@@ -76,6 +76,7 @@ def apply_inner_factorization(
         rhs_host,
         matrix_status=matrix_status,
         x=x_host,
+        scheme=getattr(inner, "scheme", "CSR") or "CSR",
     )
     info = inner.solve(**lin_kwargs)
     if info != 0:

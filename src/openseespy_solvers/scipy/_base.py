@@ -52,10 +52,14 @@ class ScipyMixin:
         shape: tuple[int, int],
         fmt: str,
     ) -> sp.spmatrix:
+        # Owned contiguous arrays (UMFPACK C API rejects non-C / non-owned views).
+        vals = np.array(values, dtype=self._compute_dtype, order="C", copy=True)
+        idx = np.array(indices, order="C", copy=True)
+        ip = np.array(indptr, order="C", copy=True)
         if fmt == "CSR":
-            return sp.csr_matrix((values.copy(), indices.copy(), indptr.copy()), shape=shape)
+            return sp.csr_matrix((vals, idx, ip), shape=shape)
         if fmt == "CSC":
-            return sp.csc_matrix((values.copy(), indices.copy(), indptr.copy()), shape=shape)
+            return sp.csc_matrix((vals, idx, ip), shape=shape)
         raise UnsupportedStorageSchemeError(f"scipy backend does not support scheme {fmt!r}")
 
     def _update_matrix(self, matrix: sp.spmatrix, values: np.ndarray) -> sp.spmatrix:

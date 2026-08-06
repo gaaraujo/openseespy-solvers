@@ -9,9 +9,48 @@ import scipy.sparse.linalg as spla
 
 from openseespy_solvers.scipy import umfpack
 
-from conftest import csr_linear_kwargs
+from conftest import csr_linear_kwargs, csc_linear_kwargs
 
 pytest.importorskip("scikits.umfpack")
+
+
+def test_umfpack_default_scheme_csc() -> None:
+    solver = umfpack()
+    assert solver.scheme == "CSC"
+    assert solver.to_openseespy()["scheme"] == "CSC"
+
+
+def test_umfpack_index_dtype_auto_uses_di() -> None:
+    A = np.array([[4.0, 1.0], [1.0, 3.0]])
+    b = np.array([1.0, 2.0])
+    x_buf = np.zeros(2, dtype=np.float64)
+    solver = umfpack(index_dtype="auto")
+    assert solver.solve(**csc_linear_kwargs(A, b, x=x_buf)) == 0
+    assert solver._umf.family == "di"
+    assert solver._csc.indices.dtype == np.int32
+    assert solver._csc.indptr.dtype == np.int32
+
+
+def test_umfpack_index_dtype_dl_forces_int64() -> None:
+    A = np.array([[4.0, 1.0], [1.0, 3.0]])
+    b = np.array([1.0, 2.0])
+    x_buf = np.zeros(2, dtype=np.float64)
+    solver = umfpack(index_dtype="dl")
+    assert solver.solve(**csc_linear_kwargs(A, b, x=x_buf)) == 0
+    assert solver._umf.family == "dl"
+    assert solver._csc.indices.dtype == np.int64
+    assert solver._csc.indptr.dtype == np.int64
+
+
+def test_umfpack_empty_indices_auto_di() -> None:
+    A = sp.csr_matrix((0, 0), dtype=np.float64)
+    b = np.zeros(0, dtype=np.float64)
+    x_buf = np.zeros(0, dtype=np.float64)
+    solver = umfpack(index_dtype="auto")
+    # Empty system short-circuits before UMFPACK; still verify family selection.
+    family = solver._select_family(A.tocsc())
+    assert family == "di"
+    assert solver.solve(**csc_linear_kwargs(A, b, x=x_buf)) == 0
 
 
 def test_umfpack_spd_system() -> None:

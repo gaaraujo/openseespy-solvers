@@ -92,9 +92,15 @@ class _CG(CupyMixin, LinearSolver):
         writable: str | list[str] = "none",
         debug: bool = False,
         dtype: Any = np.float64,
+        record_stats: bool = False,
     ) -> None:
         super().__init__(
-            scheme=scheme, writable=writable, debug=debug, preconditioner=M, dtype=dtype
+            scheme=scheme,
+            writable=writable,
+            debug=debug,
+            preconditioner=M,
+            dtype=dtype,
+            record_stats=record_stats,
         )
         self._x0 = x0
         self._rtol = rtol
@@ -112,6 +118,7 @@ class _CG(CupyMixin, LinearSolver):
             "writable": writable,
             "debug": debug,
             "dtype": dtype,
+            "record_stats": record_stats,
         }
 
     def _solve_system(self, A, b, M, matrix_status):  # noqa: ANN001
@@ -132,7 +139,7 @@ class _CG(CupyMixin, LinearSolver):
             callback=callback,
         )
         if self._x0 is not None:
-            kwargs["x0"] = self._to_device(np.asarray(self._x0, dtype=self._compute_dtype))
+            kwargs["x0"] = self._to_device(self._x0)
         result, info = self._cspla.cg(A, b, **kwargs)
         return result, int(info), (count["n"] or None)
 
@@ -152,9 +159,15 @@ class _GMRES(CupyMixin, LinearSolver):
         writable: str | list[str] = "none",
         debug: bool = False,
         dtype: Any = np.float64,
+        record_stats: bool = False,
     ) -> None:
         super().__init__(
-            scheme=scheme, writable=writable, debug=debug, preconditioner=M, dtype=dtype
+            scheme=scheme,
+            writable=writable,
+            debug=debug,
+            preconditioner=M,
+            dtype=dtype,
+            record_stats=record_stats,
         )
         self._x0 = x0
         self._rtol = rtol
@@ -174,6 +187,7 @@ class _GMRES(CupyMixin, LinearSolver):
             "writable": writable,
             "debug": debug,
             "dtype": dtype,
+            "record_stats": record_stats,
         }
 
     def _solve_system(self, A, b, M, matrix_status):  # noqa: ANN001
@@ -196,7 +210,7 @@ class _GMRES(CupyMixin, LinearSolver):
         if "restart" in inspect.signature(self._cspla.gmres).parameters:
             kwargs["restart"] = self._restart
         if self._x0 is not None:
-            kwargs["x0"] = self._to_device(np.asarray(self._x0, dtype=self._compute_dtype))
+            kwargs["x0"] = self._to_device(self._x0)
         result, info = self._cspla.gmres(A, b, **kwargs)
         return result, int(info), (count["n"] or None)
 
@@ -210,9 +224,15 @@ class _SpSolve(CupyMixin, LinearSolver):
         writable: str | list[str] = "none",
         debug: bool = False,
         dtype: Any = np.float64,
+        record_stats: bool = False,
     ) -> None:
         super().__init__(
-            scheme=scheme, writable=writable, debug=debug, preconditioner=None, dtype=dtype
+            scheme=scheme,
+            writable=writable,
+            debug=debug,
+            preconditioner=None,
+            dtype=dtype,
+            record_stats=record_stats,
         )
         self._permc_spec = permc_spec
         self._solve_func = None
@@ -222,6 +242,7 @@ class _SpSolve(CupyMixin, LinearSolver):
             "writable": writable,
             "debug": debug,
             "dtype": dtype,
+            "record_stats": record_stats,
         }
 
     def _solve_system(self, A, b, M, matrix_status):  # noqa: ANN001
@@ -566,6 +587,7 @@ def spsolve(
     writable: str | list[str] = "none",
     debug: bool = False,
     dtype: Any = np.float64,
+    record_stats: bool = False,
 ) -> _SpSolve:
     r"""Configure a sparse direct solver for OpenSees ``PythonSparse`` (GPU).
 
@@ -597,6 +619,7 @@ def spsolve(
         writable=writable,
         debug=debug,
         dtype=dtype,
+        record_stats=record_stats,
     )
 
 
@@ -612,6 +635,7 @@ def cg(
     writable: str | list[str] = "none",
     debug: bool = False,
     dtype: Any = np.float64,
+    record_stats: bool = False,
 ) -> _CG:
     r"""Configure a Conjugate Gradient solver for OpenSees ``PythonSparse`` (GPU).
 
@@ -655,6 +679,7 @@ def cg(
         writable=writable,
         debug=debug,
         dtype=dtype,
+        record_stats=record_stats,
     )
 
 
@@ -671,6 +696,7 @@ def gmres(
     writable: str | list[str] = "none",
     debug: bool = False,
     dtype: Any = np.float64,
+    record_stats: bool = False,
 ) -> _GMRES:
     r"""Configure a GMRES solver for OpenSees ``PythonSparse`` (GPU).
 
@@ -709,6 +735,7 @@ def gmres(
         writable=writable,
         debug=debug,
         dtype=dtype,
+        record_stats=record_stats,
     )
 
 

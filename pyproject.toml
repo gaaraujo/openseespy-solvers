@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openseespy-solvers"
-version = "0.1.3"
+version = "0.2.0"
 description = "scipy-style PythonSparse solvers for OpenSeesPy"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -37,7 +37,7 @@ opensees = ["openseespy"]
 cupy = ["cupy>=13.0"]
 cuda12 = ["cupy-cuda12x>=13.0", "nvmath-python[cu12]>=0.9.0"]
 cuda13 = ["cupy-cuda13x>=13.0", "nvmath-python[cu13]>=0.9.0"]
-# 64-bit UMFPACK direct solver (CPU) for openseespy_solvers.scipy.umfpack.
+# UMFPACK direct solver (CPU) for openseespy_solvers.scipy.umfpack (di/dl).
 # On Windows, prefer: conda install -c conda-forge scikit-umfpack (PyPI is sdist-only).
 umfpack = ["scikit-umfpack>=0.3.3"]
 dev = [

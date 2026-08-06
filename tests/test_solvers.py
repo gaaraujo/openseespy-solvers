@@ -167,7 +167,7 @@ def test_hybrid_first_solve_factorizes() -> None:
     x_expected = np.linalg.solve(A, b)
     x_buf = np.zeros(2, dtype=np.float64)
     kwargs = csr_linear_kwargs(A, b, x=x_buf, matrix_status="STRUCTURE_CHANGED")
-    solver = hybrid(spsolve())
+    solver = hybrid(spsolve(), record_stats=True)
     assert solver.solve(**kwargs) == 0
     np.testing.assert_allclose(x_buf, x_expected, rtol=1e-10)
     assert solver.stats.num_factorizations == 1
@@ -181,7 +181,7 @@ def test_hybrid_reuses_factorization_with_gmres() -> None:
     b = np.array([1.0, 2.0])
     x_buf = np.zeros(2, dtype=np.float64)
     inner = spsolve()
-    solver = hybrid(inner, rtol=1e-12)
+    solver = hybrid(inner, rtol=1e-12, record_stats=True)
 
     kwargs1 = csr_linear_kwargs(A, b, x=x_buf, matrix_status="STRUCTURE_CHANGED")
     assert solver.solve(**kwargs1) == 0
@@ -204,7 +204,7 @@ def test_hybrid_reuses_factorization_after_model_rebuild_same_size() -> None:
     A1 = sp.csr_matrix(np.array([[4.0, 1.0], [1.0, 3.0]]))
     b = np.array([1.0, 2.0])
     x_buf = np.zeros(2, dtype=np.float64)
-    solver = hybrid(spsolve(), rtol=1e-12)
+    solver = hybrid(spsolve(), rtol=1e-12, record_stats=True)
 
     kwargs1 = csr_linear_kwargs(A1, b, x=x_buf, matrix_status="STRUCTURE_CHANGED")
     assert solver.solve(**kwargs1) == 0
@@ -241,3 +241,38 @@ def test_unsupported_compute_dtype() -> None:
         resolve_compute_dtype(np.float16)
     with pytest.raises(UnsupportedComputeDtypeError):
         cg(dtype=np.complex128)
+
+
+def test_residual_opt_in_record_stats() -> None:
+    A = np.array([[4.0, 1.0], [1.0, 3.0]])
+    b = np.array([1.0, 2.0])
+    x_buf = np.zeros(2, dtype=np.float64)
+    kwargs = csr_linear_kwargs(A, b, x=x_buf)
+
+    default = spsolve()
+    assert default.solve(**kwargs) == 0
+    assert default.stats.num_solves == 0
+    assert default.stats.last_residual_norm is None
+    assert default.stats.last_solve_time is None
+
+    stats_only = spsolve(record_stats=True)
+    x_buf2 = np.zeros(2, dtype=np.float64)
+    assert stats_only.solve(**csr_linear_kwargs(A, b, x=x_buf2)) == 0
+    assert stats_only.stats.num_solves == 1
+    assert stats_only.stats.last_solve_time is not None
+    assert stats_only.stats.last_residual_norm is None
+
+    debug_only = spsolve(debug=True)
+    x_buf3 = np.zeros(2, dtype=np.float64)
+    assert debug_only.solve(**csr_linear_kwargs(A, b, x=x_buf3)) == 0
+    assert debug_only.stats.num_solves == 0
+    assert debug_only.stats.last_residual_norm is None
+
+    both = spsolve(record_stats=True, debug=True)
+    x_buf4 = np.zeros(2, dtype=np.float64)
+    assert both.solve(**csr_linear_kwargs(A, b, x=x_buf4)) == 0
+    residual = both.stats.last_residual_norm
+    assert both.stats.num_solves == 1
+    assert residual is not None
+    assert np.isfinite(residual)
+    assert residual < 1e-10

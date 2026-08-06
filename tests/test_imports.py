@@ -12,7 +12,7 @@ from openseespy_solvers.exceptions import BackendNotAvailableError
 
 
 def test_version() -> None:
-    assert openseespy_solvers.__version__ == "0.1.3"
+    assert openseespy_solvers.__version__ == "0.2.0"
 
 
 def test_scipy_namespace_exports() -> None:

@@ -8,7 +8,7 @@ import scipy.sparse as sp
 
 from openseespy_solvers.scipy import eigsh, lobpcg
 
-from conftest import csr_eigen_kwargs
+from conftest import csr_eigen_kwargs, csc_eigen_kwargs
 
 
 def test_eigsh_largest_diagonal() -> None:
@@ -48,6 +48,22 @@ def test_eigsh_diagonal() -> None:
     np.testing.assert_allclose(ev, [2.0, 3.0, 4.0], rtol=1e-6)
     assert sp.issparse(solver.K)
     assert sp.issparse(solver.M)
+
+
+def test_eigsh_shift_invert_csc_scheme() -> None:
+    """CSC assembly matches SciPy shift-invert LU (SuperLU/UMFPACK) preference."""
+    n = 6
+    K = sp.diags(np.arange(2.0, 2.0 + n, 1.0))
+    M = sp.eye(n)
+    num_modes = 3
+    kwargs = csc_eigen_kwargs(K, M, num_modes=num_modes, find_smallest=True)
+    ev = np.frombuffer(kwargs["eigenvalues"], dtype=np.float64, count=num_modes)
+    solver = eigsh(tol=1e-10, scheme="CSC")
+    assert solver.scheme == "CSC"
+    solver.solve(**kwargs)
+    np.testing.assert_allclose(ev, [2.0, 3.0, 4.0], rtol=1e-6)
+    assert solver.K.format == "csc"
+    assert solver.M.format == "csc"
 
 
 def test_eigsh_to_openseespy() -> None:

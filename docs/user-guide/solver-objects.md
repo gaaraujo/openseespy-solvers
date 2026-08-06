@@ -35,6 +35,9 @@ All cached attributes are `None` until the first `solve` (or `formAp` for `A`).
 `stats`
 : Runtime statistics (`num_solves`, `last_solve_time`, `last_info`,
   `last_num_iterations`, `last_residual_norm`, `last_error`).
+  Counters and timing update only when constructed with `record_stats=True`.
+  `last_residual_norm` additionally requires `debug=True` (extra SpMV);
+  otherwise it remains `None`.
 
 ## Eigen solver attributes
 
@@ -51,6 +54,15 @@ All cached attributes are `None` until the first `solve` (or `formAp` for `A`).
 `copy.copy(solver)` returns a new instance with the same keyword configuration
 but reset internal cache and statistics. OpenSees uses this when cloning a
 system of equations.
+
+## Compute precision (`dtype`) *(experimental)*
+
+Set `debug=True` at construction to propagate exceptions from `solve` and
+`formAp` instead of returning a negative status code (linear solvers only).
+
+Set `record_stats=True` to update `solver.stats` after each linear solve.
+Relative residual (`last_residual_norm`) is computed only when both
+`record_stats=True` and `debug=True` (extra sparse matvec).
 
 ## Compute precision (`dtype`) *(experimental)*
 

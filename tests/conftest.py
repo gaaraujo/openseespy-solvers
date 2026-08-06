@@ -31,6 +31,31 @@ def csr_linear_kwargs(
     }
 
 
+def csc_linear_kwargs(
+    A: sp.spmatrix | np.ndarray,
+    b: np.ndarray,
+    *,
+    x: np.ndarray | None = None,
+    matrix_status: str = "STRUCTURE_CHANGED",
+) -> dict:
+    """Build kwargs mimicking OpenSees PythonSparse linear ``solve`` (CSC)."""
+    mat = sp.csc_matrix(A)
+    if x is None:
+        x = np.zeros(mat.shape[0], dtype=np.float64)
+    rhs = np.asarray(b, dtype=np.float64)
+    return {
+        "index_ptr": memoryview(mat.indptr.astype(np.int32)),
+        "indices": memoryview(mat.indices.astype(np.int32)),
+        "values": memoryview(mat.data.astype(np.float64)),
+        "rhs": memoryview(rhs),
+        "x": memoryview(x),
+        "num_eqn": mat.shape[0],
+        "nnz": mat.nnz,
+        "matrix_status": matrix_status,
+        "storage_scheme": "CSC",
+    }
+
+
 def csr_eigen_kwargs(
     K: sp.spmatrix | np.ndarray,
     M: sp.spmatrix | np.ndarray,
@@ -56,6 +81,40 @@ def csr_eigen_kwargs(
         "nnz": k_mat.nnz,
         "matrix_status": matrix_status,
         "storage_scheme": "CSR",
+        "num_modes": num_modes,
+        "find_smallest": find_smallest,
+    }
+
+
+def csc_eigen_kwargs(
+    K: sp.spmatrix | np.ndarray,
+    M: sp.spmatrix | np.ndarray,
+    *,
+    num_modes: int,
+    find_smallest: bool = True,
+    matrix_status: str = "STRUCTURE_CHANGED",
+) -> dict:
+    """Build kwargs mimicking OpenSees PythonSparse eigen ``solve`` (CSC).
+
+    Useful for ``eigsh(scheme='CSC')``: SciPy's shift-invert LU (SuperLU /
+    UMFPACK) prefers CSC, so OpenSees can assemble ``K``/``M`` in that layout.
+    """
+    k_mat = sp.csc_matrix(K)
+    m_mat = sp.csc_matrix(M)
+    n = k_mat.shape[0]
+    eigenvalues = np.zeros(num_modes, dtype=np.float64)
+    eigenvectors = np.zeros(num_modes * n, dtype=np.float64)
+    return {
+        "index_ptr": memoryview(k_mat.indptr.astype(np.int32)),
+        "indices": memoryview(k_mat.indices.astype(np.int32)),
+        "k_values": memoryview(k_mat.data.astype(np.float64)),
+        "m_values": memoryview(m_mat.data.astype(np.float64)),
+        "eigenvalues": memoryview(eigenvalues),
+        "eigenvectors": memoryview(eigenvectors),
+        "num_eqn": n,
+        "nnz": k_mat.nnz,
+        "matrix_status": matrix_status,
+        "storage_scheme": "CSC",
         "num_modes": num_modes,
         "find_smallest": find_smallest,
     }

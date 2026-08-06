@@ -8,7 +8,12 @@ from typing import Any
 
 @dataclass
 class LinearSolverStats:
-    """Statistics for a linear (``Ax = b``) solver."""
+    """Statistics for a linear (``Ax = b``) solver.
+
+    Counters and timing update when the solver was constructed with
+    ``record_stats=True``. ``last_residual_norm`` is set only when both
+    ``record_stats`` and ``debug`` are ``True``; otherwise it remains ``None``.
+    """
 
     num_solves: int = 0
     last_solve_time: float | None = None

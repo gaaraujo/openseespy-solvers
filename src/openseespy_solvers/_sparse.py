@@ -110,9 +110,25 @@ def csr_linear_kwargs_from_matrix(
     *,
     matrix_status: str,
     x: np.ndarray | None = None,
+    scheme: str = "CSR",
 ) -> dict:
-    """Build OpenSees-style linear ``solve`` kwargs from a CSR matrix and RHS."""
-    if hasattr(matrix, "tocsr"):
+    """Build OpenSees-style linear ``solve`` kwargs from a sparse matrix and RHS.
+
+    Parameters
+    ----------
+    scheme : {'CSR', 'CSC'}, optional
+        Storage layout of the marshalled buffers. Use ``'CSC'`` when the inner
+        solver prefers CSC (e.g. ``umfpack``), to avoid an extra convert.
+    """
+    fmt = scheme.upper()
+    if fmt not in ("CSR", "CSC"):
+        raise UnsupportedStorageSchemeError(
+            f"Storage scheme {scheme!r} is not supported in this version."
+        )
+    if fmt == "CSC":
+        if hasattr(matrix, "tocsc"):
+            matrix = matrix.tocsc()
+    elif hasattr(matrix, "tocsr"):
         matrix = matrix.tocsr()
     indptr = _host_array(matrix.indptr).astype(np.int32, copy=False)
     indices = _host_array(matrix.indices).astype(np.int32, copy=False)
@@ -130,5 +146,5 @@ def csr_linear_kwargs_from_matrix(
         "num_eqn": n,
         "nnz": values.size,
         "matrix_status": matrix_status,
-        "storage_scheme": "CSR",
+        "storage_scheme": fmt,
     }

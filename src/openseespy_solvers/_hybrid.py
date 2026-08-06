@@ -58,6 +58,7 @@ class _Hybrid(LinearSolver):
         x0: Any = None,
         refresh_every: int | None = None,
         debug: bool = False,
+        record_stats: bool = False,
     ) -> None:
         if not isinstance(direct, LinearSolver):
             raise InvalidOpenSeesDataError(
@@ -74,6 +75,7 @@ class _Hybrid(LinearSolver):
             debug=debug,
             preconditioner=None,
             dtype=dtype,
+            record_stats=record_stats,
         )
         self._inner = direct
         self.backend = direct.backend
@@ -97,6 +99,7 @@ class _Hybrid(LinearSolver):
             "x0": x0,
             "refresh_every": refresh_every,
             "debug": debug,
+            "record_stats": record_stats,
         }
 
     def __copy__(self) -> _Hybrid:
@@ -187,7 +190,8 @@ class _Hybrid(LinearSolver):
             self._has_factor = True
             self._frozen_n = n
             self._last_x = result
-            self.stats.num_factorizations += 1
+            if self.record_stats:
+                self.stats.num_factorizations += 1
             return result, 0, None
 
         gmres_fn, LinearOperator = self._gmres_callables()
@@ -220,7 +224,8 @@ class _Hybrid(LinearSolver):
             x0=x0,
         )
         result, info = gmres_fn(A, b, **kwargs)
-        self.stats.num_gmres_solves += 1
+        if self.record_stats:
+            self.stats.num_gmres_solves += 1
 
         if info != 0:
             result = self._apply_factorization(
@@ -232,7 +237,8 @@ class _Hybrid(LinearSolver):
             self._has_factor = True
             self._frozen_n = n
             self._last_x = result
-            self.stats.num_factorizations += 1
+            if self.record_stats:
+                self.stats.num_factorizations += 1
             return result, 0, (count["n"] or None)
 
         self._last_x = result
@@ -249,6 +255,7 @@ def hybrid(
     x0: Any = None,
     refresh_every: int | None = None,
     debug: bool = False,
+    record_stats: bool = False,
 ) -> _Hybrid:
     r"""Configure a hybrid direct-iterative solver for OpenSees ``PythonSparse``.
 
@@ -293,6 +300,9 @@ def hybrid(
         ``None`` (refresh only on size change or GMRES failure).
     debug : bool, optional
         Re-raise exceptions instead of returning a failure code.
+    record_stats : bool, optional
+        If ``True``, update ``solver.stats`` after each solve. Relative residual
+        requires both ``record_stats`` and ``debug``. Default is ``False``.
 
     Returns
     -------
@@ -316,4 +326,5 @@ def hybrid(
         x0=x0,
         refresh_every=refresh_every,
         debug=debug,
+        record_stats=record_stats,
     )

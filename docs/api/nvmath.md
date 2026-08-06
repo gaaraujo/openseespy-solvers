@@ -48,6 +48,9 @@ Not exposed: `stream`, a full `options=` object, and other `plan_config` /
 copies them to the device, factors the sparse matrix with `nvmath.sparse`/cuDSS, and writes the
 solution back through the OpenSeesPy callback.
 
+Prefer `scheme='CSR'` (the factory default): cuDSS uses CSR internally, so
+`scheme='CSC'` forces an extra CSC→CSR conversion.
+
 ## Function Reference
 
 ::: openseespy_solvers.nvmath

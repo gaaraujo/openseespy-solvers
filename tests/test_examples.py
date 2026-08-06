@@ -32,6 +32,7 @@ BENCHMARK_SCRIPTS = [EXAMPLES / "brick_bar.py", EXAMPLES / "brick_bar_eigen.py"]
 
 
 def _run_example_script(path: Path) -> str:
+    """Execute an example as ``__main__`` without inheriting pytest's argv."""
     out = io.StringIO()
     old_argv = sys.argv
     sys.argv = [str(path)]

@@ -53,9 +53,11 @@ class BaseOpenSeesSolver(ABC):
         scheme: str = "CSR",
         debug: bool = False,
         dtype: Any = np.float64,
+        record_stats: bool = False,
     ) -> None:
         self.scheme = scheme
         self.debug = debug
+        self.record_stats = record_stats
         self._compute_dtype = resolve_compute_dtype(dtype)
         self._matrix: Any | None = None
         self._k_matrix: Any | None = None
@@ -212,8 +214,11 @@ class LinearSolver(BaseOpenSeesSolver, ABC):
         debug: bool = False,
         preconditioner: Any = None,
         dtype: Any = np.float64,
+        record_stats: bool = False,
     ) -> None:
-        super().__init__(scheme=scheme, debug=debug, dtype=dtype)
+        super().__init__(
+            scheme=scheme, debug=debug, dtype=dtype, record_stats=record_stats
+        )
         self.writable = _normalize_writable(writable)
         self._preconditioner = preconditioner
         self._preconditioner_cached: Any | None = None
@@ -289,7 +294,8 @@ class LinearSolver(BaseOpenSeesSolver, ABC):
             self._x = result if self._on_device else x_buf
 
             residual = None
-            if num_eqn > 0:
+            # Residual SpMV doubles matvec work; only with record_stats+debug.
+            if self.record_stats and self.debug and num_eqn > 0:
                 ax = np.asarray(self._to_host(self._matvec(A, result)), dtype=OPENSEES_BUFFER_DTYPE)
                 r = rhs - ax
                 norm_b = float(np.linalg.norm(rhs))
@@ -297,15 +303,17 @@ class LinearSolver(BaseOpenSeesSolver, ABC):
                     float(np.linalg.norm(r) / norm_b) if norm_b > 0 else float(np.linalg.norm(r))
                 )
 
-            self.stats.num_solves += 1
-            self.stats.last_solve_time = elapsed
-            self.stats.last_info = info
-            self.stats.last_num_iterations = num_iter
-            self.stats.last_residual_norm = residual
-            self.stats.last_error = None
+            if self.record_stats:
+                self.stats.num_solves += 1
+                self.stats.last_solve_time = elapsed
+                self.stats.last_info = info
+                self.stats.last_num_iterations = num_iter
+                self.stats.last_residual_norm = residual
+                self.stats.last_error = None
             return 0 if info == 0 else -abs(int(info))
         except Exception as exc:
-            self.stats.last_error = exc
+            if self.record_stats:
+                self.stats.last_error = exc
             if self.debug:
                 raise
             return -1
@@ -325,7 +333,8 @@ class LinearSolver(BaseOpenSeesSolver, ABC):
             self._write_opensees_buffer(ap_buf, result)
             return 0
         except Exception as exc:
-            self.stats.last_error = exc
+            if self.record_stats:
+                self.stats.last_error = exc
             if self.debug:
                 raise
             return -1

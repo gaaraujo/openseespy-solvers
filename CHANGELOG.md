@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-06
+
+### Added
+
+- `record_stats=True` on linear solvers — opt-in update of `solver.stats`
+  (counters, timing, `last_info`). Relative residual (`last_residual_norm`,
+  extra SpMV) requires both `record_stats` and `debug`.
+- `umfpack(..., index_dtype=...)` — `'auto'` / `'int32'` / `'di'` prefer UMFPACK
+  `di`; `'int64'` / `'dl'` force `dl` (mirrors native `useLongIndices`).
+
+### Changed
+
+- Solver stats and residual SpMV are no longer updated on every solve (was a
+  fixed overhead even when unused). `debug` alone only re-raises exceptions.
+- `umfpack()` default `scheme` is `'CSC'` (UMFPACK-native layout).
+- Docs: prefer CSC for UMFPACK; prefer CSR for nvmath/cuDSS; drop always-`dl`
+  wording.
+
+### Fixed
+
+- SciPy matrix build avoids pointless extra copies while keeping owned C arrays
+  for UMFPACK.
+- Inner direct solvers (e.g. `precond.direct(umfpack())`) marshal buffers in
+  the inner solver's `scheme` instead of always CSR.
+
 ## [0.1.3] - 2026-06-08
 
 ### Changed
@@ -64,13 +89,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Per-backend namespaces `openseespy_solvers.scipy` and `openseespy_solvers.cupy`.
-- scipy solvers: `spsolve`, `cg`, `gmres`, `eigsh`, `lobpcg`.
-- cupy solvers: `spsolve`, `cg`, `gmres`, `lobpcg` (no generalized `eigsh`).
+- SciPy solvers: `spsolve`, `cg`, `gmres`, `eigsh`, `lobpcg`.
+- CuPy solvers: `spsolve`, `cg`, `gmres`, `lobpcg` (no generalized `eigsh`).
 - `.to_opensees()` helper for OpenSeesPy `PythonSparse` system and eigen commands.
 - `formAp` matrix-vector product on all linear solvers.
 - `copy.copy` support via `__copy__` / `__deepcopy__` for OpenSees SOE cloning.
 - Exposed solver arrays: `A`, `b`, `x` (linear) and `K`, `M` (eigen).
 - Preconditioner factories: `M=` accepts a ready operator or callable `M(A)`.
-- Built-in scipy preconditioners in `openseespy_solvers.scipy.precond` (`jacobi`, `ilu`).
+- Built-in SciPy preconditioners in `openseespy_solvers.scipy.precond` (`jacobi`, `ilu`).
 - Solver statistics via `.stats`.
 - Examples and tests that do not require OpenSeesPy.

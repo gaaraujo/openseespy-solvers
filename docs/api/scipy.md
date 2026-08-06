@@ -60,8 +60,15 @@ python -m pip install "openseespy-solvers[umfpack]"
 
 On Windows, install `scikit-umfpack` from conda-forge instead.
 
+[`umfpack`](#openseespy_solvers.scipy.umfpack) defaults to `scheme='CSC'` and prefers the
+`di` (int32) family — matching OpenSees native `UmfPack` — widening to `dl`
+(int64) only when needed (`index_dtype='auto'`). For shift-invert
+[`eigsh`](#openseespy_solvers.scipy.eigsh), consider `scheme='CSC'` so OpenSees
+assembles `K`/`M` for SciPy's SuperLU/UMFPACK factor; plain ARPACK matvecs are
+usually happier with CSR (the default).
+
 Parameters documented below follow `scipy` naming where possible. Extra parameters such as
-`scheme`, `writable`, `debug`, and `dtype` control the OpenSeesPy integration.
+`scheme`, `writable`, `debug`, `record_stats`, and `dtype` control the OpenSeesPy integration.
 
 ## Function Reference
 

@@ -10,6 +10,11 @@ debug : bool, optional
     If ``True``, exceptions raised during :meth:`~openseespy_solvers._base.LinearSolver.solve`
     or :meth:`~openseespy_solvers._base.LinearSolver.formAp` are re-raised. Otherwise a
     negative status code is returned. Default is ``False``.
+record_stats : bool, optional
+    If ``True``, update ``solver.stats`` after each solve (counters, timing,
+    ``last_info``). Relative residual (``last_residual_norm``, extra SpMV) is
+    computed only when *both* ``record_stats`` and ``debug`` are ``True``.
+    Default is ``False``.
 dtype : dtype or str, optional
     Floating-point precision for the numerical solve (``float32`` or ``float64``).
     OpenSees buffer I/O remains ``float64``; values are cast at the boundary.

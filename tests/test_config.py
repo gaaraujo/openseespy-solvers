@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 
+import pytest
+
 from openseespy_solvers.scipy import cg, spsolve
 
 
@@ -12,6 +14,16 @@ def test_to_openseespy_linear_defaults() -> None:
     cfg = solver.to_openseespy()
     assert cfg["solver"] is solver
     assert cfg["scheme"] == "CSR"
+    assert cfg["writable"] == "none"
+
+
+def test_to_openseespy_umfpack_defaults() -> None:
+    from openseespy_solvers.scipy import umfpack
+
+    pytest.importorskip("scikits.umfpack")
+    solver = umfpack()
+    cfg = solver.to_openseespy()
+    assert cfg["scheme"] == "CSC"
     assert cfg["writable"] == "none"
 
 

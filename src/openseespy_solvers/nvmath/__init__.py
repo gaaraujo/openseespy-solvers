@@ -48,6 +48,7 @@ class _DirectSolver(NvMathMixin, LinearSolver):
         writable: str | list[str] = "none",
         debug: bool = False,
         dtype: Any = np.float64,
+        record_stats: bool = False,
     ) -> None:
         self._execution = execution
         self._plan_algorithm = plan_algorithm
@@ -67,6 +68,7 @@ class _DirectSolver(NvMathMixin, LinearSolver):
             "writable": writable,
             "debug": debug,
             "dtype": dtype,
+            "record_stats": record_stats,
         }
         super().__init__(
             scheme=scheme,
@@ -74,6 +76,7 @@ class _DirectSolver(NvMathMixin, LinearSolver):
             debug=debug,
             preconditioner=None,
             dtype=dtype,
+            record_stats=record_stats,
             sp_module=sp_module,
             device=device,
         )
@@ -168,6 +171,7 @@ def direct_solver(
     writable: str | list[str] = "none",
     debug: bool = False,
     dtype: Any = np.float64,
+    record_stats: bool = False,
 ) -> _DirectSolver:
     r"""Configure an nvmath.sparse direct solver for OpenSees ``PythonSparse``.
 
@@ -205,6 +209,9 @@ def direct_solver(
 
     Notes
     -----
+    Prefer ``scheme='CSR'`` (the default). cuDSS operates on CSR; requesting
+    ``scheme='CSC'`` forces a CSC→CSR conversion in the backend.
+
     Install cupy and ``nvmath-python`` wheels matching your CUDA driver; see
     :doc:`installation`.
 
@@ -232,4 +239,5 @@ def direct_solver(
         writable=writable,
         debug=debug,
         dtype=dtype,
+        record_stats=record_stats,
     )
