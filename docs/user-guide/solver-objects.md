@@ -81,7 +81,9 @@ and ask OpenSees to store only the lower triangle, which halves the values
 copied per coefficient update. Use them only when the tangent is symmetric
 (elastic, most plasticity with associated flow, no frictional contact or
 follower loads). OpenSees builds without lower-triangle storage send the full
-matrix; the factorization type still applies.
+matrix; the factorization type still applies. Lower-triangle storage is an
+upcoming OpenSees feature: the current `openseespy` wheel (3.8.0) always sends
+the full matrix, which these solvers handle.
 
 ## Iterative solver tolerances
 

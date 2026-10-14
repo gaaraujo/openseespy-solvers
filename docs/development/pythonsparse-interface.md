@@ -35,7 +35,13 @@ OpenSees calls `solver.solve(**kwargs)`.
   (row >= column). Builds without this option ignore the key and send the full
   matrix without `matrix_type`; solvers in this package handle both.
 
-**Optional dictionary keys** (newer OpenSees builds; older builds ignore them)
+**Optional dictionary keys**
+
+!!! note "Upcoming OpenSees feature"
+    `matrix_type` and `typed` are part of an upcoming OpenSees release and are
+    not in the current `openseespy` wheel on PyPI (3.8.0). That wheel ignores
+    both keys and sends the full matrix as raw bytes, so passing them is safe:
+    solvers in this package detect what OpenSees actually sent on every solve.
 
 `'matrix_type': 'SYMMETRIC_LOWER'`
 : Store and send only the lower triangle of a symmetric tangent (halves the
@@ -105,6 +111,12 @@ Eigen analysis follows the same split: OpenSees assembles **K** and **M** on the
 solver object runs ARPACK, LOBPCG, or shift-invert on CPU and/or GPU depending on the
 solver constructor you choose.
 
+!!! warning "Upcoming OpenSees feature: not in the current pip wheel"
+    `DistributedPythonSparse` is part of an upcoming OpenSees release. The
+    current `openseespy` wheel on PyPI (3.8.0) is a serial build and rejects
+    `system('DistributedPythonSparse', ...)` with "unknown system type". It
+    needs an OpenSeesPy built with MPI (parallel interpreters).
+
 **Partitioned (MPI) models.** OpenSeesPy builds with parallel interpreters
 provide `system('DistributedPythonSparse', solver.to_openseespy())` and
 `eigen('DistributedPythonSparse', n, ...)`. Every rank runs the same script and
@@ -113,8 +125,7 @@ their matrix contributions to rank 0, only rank 0 calls the solver, and the
 solution is sent back. Nothing else changes in the script. Constructors in this
 package allocate nothing on the GPU until the first solve, so worker ranks never
 touch the device. `'PythonSparse'` itself stays serial on every build, so
-scripts that run independent models per rank are unaffected. No PyPI wheel
-includes the MPI build yet.
+scripts that run independent models per rank are unaffected.
 
 **Where parallelism exists today**
 
