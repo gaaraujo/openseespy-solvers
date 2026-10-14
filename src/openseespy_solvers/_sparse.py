@@ -1,61 +1,154 @@
-"""Parsing of OpenSees PythonSparse buffers into NumPy arrays.
+"""Parsing of OpenSees PythonSparse buffers.
 
-These helpers are backend-agnostic: they only turn the raw memoryviews OpenSees
-passes into NumPy views. Building the actual sparse matrix (scipy, cupy, ...) is
-the job of each namespace's solver, via its ``_build_matrix`` hook.
+OpenSees hands its sparse matrix over as raw memoryviews in one of several
+layouts: CSR, CSC or COO, optionally holding only the lower triangle of a
+symmetric matrix (``matrix_type='SYMMETRIC_LOWER'``, OpenSees builds that
+support it). Backends want one specific compressed format. :class:`Layout`
+reconciles the two once per sparsity pattern (``STRUCTURE_CHANGED``): it holds
+the target ``indptr``/``indices`` and, when the orders differ, a permutation
+that maps OpenSees' value order onto the backend's ``data`` order. Coefficient
+updates are then a single gather (or a plain copy) with no index work.
 """
 
 from __future__ import annotations
 
-from typing import Any, NamedTuple
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
+import scipy.sparse as sp
 
 from openseespy_solvers.exceptions import InvalidOpenSeesDataError, UnsupportedStorageSchemeError
 
+GENERAL = "GENERAL"
+SYMMETRIC_LOWER = "SYMMETRIC_LOWER"
 
-class SparseArrays(NamedTuple):
-    """Parsed sparse matrix arrays plus shape/format metadata."""
 
-    values: np.ndarray
-    indices: np.ndarray
-    indptr: np.ndarray
-    shape: tuple[int, int]
+@dataclass(frozen=True)
+class Layout:
+    """Backend-side description of one OpenSees sparsity pattern.
+
+    Attributes
+    ----------
+    fmt : {'CSR', 'CSC'}
+        Compressed format handed to the backend.
+    indptr, indices : ndarray of int32
+        Pattern in ``fmt`` with sorted indices (owned copies).
+    shape : tuple of int
+        Matrix shape ``(n, n)``.
+    perm : ndarray of intp or None
+        ``backend_data = opensees_values[perm]``; ``None`` when the orders agree.
+    lower : bool
+        ``True`` when the backend receives only the lower triangle (row >= col)
+        of a symmetric matrix.
+    nnz_in : int
+        Number of values in the OpenSees buffer.
+    """
+
     fmt: str
+    indptr: np.ndarray
+    indices: np.ndarray
+    shape: tuple[int, int]
+    perm: np.ndarray | None
+    lower: bool
+    nnz_in: int
+
+    def reorder(self, values: np.ndarray) -> np.ndarray:
+        """Return ``values`` in backend order (a view when no reordering is needed)."""
+        return values if self.perm is None else values[self.perm]
 
 
-def parse_sparse_arrays(
-    kwargs: dict[str, Any],
-    *,
-    values_key: str = "values",
-) -> SparseArrays:
-    """Parse a single sparse matrix's buffers from OpenSees kwargs."""
-    storage_scheme = kwargs.get("storage_scheme", "CSR")
-    num_eqn = int(kwargs["num_eqn"])
-    nnz = int(kwargs["nnz"])
+def _positions(n: int) -> np.ndarray:
+    # 1-based so that no entry is an explicit zero that scipy might drop.
+    return np.arange(1, n + 1, dtype=np.int64)
 
-    if values_key not in kwargs:
-        raise InvalidOpenSeesDataError(f"Missing buffer: {values_key}")
-    values = np.frombuffer(kwargs[values_key], dtype=np.float64, count=nnz)
 
-    if storage_scheme in ("CSR", "CSC"):
+def _pattern_matrix(scheme: str, kwargs: dict[str, Any], n: int, nnz: int) -> sp.spmatrix:
+    """Sparse matrix whose ``data`` holds the 1-based position of each OpenSees value."""
+    pos = _positions(nnz)
+    if scheme in ("CSR", "CSC"):
         if "index_ptr" not in kwargs or "indices" not in kwargs:
             raise InvalidOpenSeesDataError("CSR/CSC requires index_ptr and indices buffers")
-        indptr = np.frombuffer(kwargs["index_ptr"], dtype=np.int32, count=num_eqn + 1)
+        indptr = np.frombuffer(kwargs["index_ptr"], dtype=np.int32, count=n + 1)
         indices = np.frombuffer(kwargs["indices"], dtype=np.int32, count=nnz)
-        return SparseArrays(values, indices, indptr, (num_eqn, num_eqn), storage_scheme)
-
+        cls = sp.csr_matrix if scheme == "CSR" else sp.csc_matrix
+        return cls((pos, indices.copy(), indptr.copy()), shape=(n, n))
+    if scheme == "COO":
+        if "row" not in kwargs or "col" not in kwargs:
+            raise InvalidOpenSeesDataError("COO requires row and col buffers")
+        row = np.frombuffer(kwargs["row"], dtype=np.int32, count=nnz)
+        col = np.frombuffer(kwargs["col"], dtype=np.int32, count=nnz)
+        return sp.coo_matrix((pos, (row, col)), shape=(n, n))
     raise UnsupportedStorageSchemeError(
-        f"Storage scheme {storage_scheme!r} is not supported in this version."
+        f"Storage scheme {scheme!r} is not supported (expected CSR, CSC or COO)."
     )
 
 
-def parse_eigen_values(kwargs: dict[str, Any]) -> np.ndarray:
-    """Parse the mass-matrix coefficient buffer for an eigen solve."""
+def plan_layout(
+    kwargs: dict[str, Any],
+    *,
+    formats: tuple[str, ...] = ("CSR", "CSC"),
+    accepts_lower: bool = False,
+) -> Layout:
+    """Plan how OpenSees values map onto a backend matrix.
+
+    Parameters
+    ----------
+    kwargs : dict
+        OpenSees ``solve`` keyword arguments (``STRUCTURE_CHANGED`` call).
+    formats : tuple of {'CSR', 'CSC'}
+        Formats the backend accepts, in order of preference.
+    accepts_lower : bool
+        Whether the backend can use the lower triangle of a symmetric matrix
+        directly. Otherwise a lower-triangle buffer is expanded to the full
+        matrix.
+    """
+    scheme = kwargs.get("storage_scheme", "CSR")
+    n = int(kwargs["num_eqn"])
     nnz = int(kwargs["nnz"])
-    if "m_values" not in kwargs:
-        raise InvalidOpenSeesDataError("Missing buffer: m_values")
-    return np.frombuffer(kwargs["m_values"], dtype=np.float64, count=nnz)
+    lower = kwargs.get("matrix_type", GENERAL) == SYMMETRIC_LOWER
+
+    # Fast path: the OpenSees layout is already acceptable as is.
+    if scheme in formats and scheme in ("CSR", "CSC") and (accepts_lower or not lower):
+        indptr = np.array(np.frombuffer(kwargs["index_ptr"], dtype=np.int32, count=n + 1))
+        indices = np.array(np.frombuffer(kwargs["indices"], dtype=np.int32, count=nnz))
+        return Layout(scheme, indptr, indices, (n, n), None, lower, nnz)
+
+    pattern = _pattern_matrix(scheme, kwargs, n, nnz)
+    if lower and not accepts_lower:
+        # Mirror the strictly lower part; the two parts have disjoint patterns,
+        # so positions are carried over without summation.
+        pattern = (pattern + sp.tril(pattern, k=-1).T).tocsr()
+        lower = False
+    fmt = formats[0]
+    pattern = pattern.tocsr() if fmt == "CSR" else pattern.tocsc()
+    pattern.sort_indices()
+    perm = pattern.data.astype(np.intp) - 1
+    if perm.shape[0] == nnz and np.array_equal(perm, np.arange(nnz)):
+        perm = None
+    return Layout(
+        fmt,
+        pattern.indptr.astype(np.int32),
+        pattern.indices.astype(np.int32),
+        (n, n),
+        perm,
+        lower,
+        nnz,
+    )
+
+
+def read_values(kwargs: dict[str, Any], key: str = "values") -> np.ndarray:
+    """Zero-copy float64 view of an OpenSees coefficient buffer."""
+    if key not in kwargs:
+        raise InvalidOpenSeesDataError(f"Missing buffer: {key}")
+    return np.frombuffer(kwargs[key], dtype=np.float64, count=int(kwargs["nnz"]))
+
+
+def read_vector(kwargs: dict[str, Any], key: str) -> np.ndarray:
+    """Zero-copy float64 view of an OpenSees length-``num_eqn`` vector buffer."""
+    if key not in kwargs:
+        raise InvalidOpenSeesDataError(f"Missing buffer: {key}")
+    return np.frombuffer(kwargs[key], dtype=np.float64, count=int(kwargs["num_eqn"]))
 
 
 def _host_array(array: Any) -> np.ndarray:
@@ -123,7 +216,7 @@ def csr_linear_kwargs_from_matrix(
     fmt = scheme.upper()
     if fmt not in ("CSR", "CSC"):
         raise UnsupportedStorageSchemeError(
-            f"Storage scheme {scheme!r} is not supported in this version."
+            f"Storage scheme {scheme!r} is not supported for marshalled buffers."
         )
     if fmt == "CSC":
         if hasattr(matrix, "tocsc"):

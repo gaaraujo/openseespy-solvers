@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import inspect
 from typing import Any
 
@@ -10,6 +11,11 @@ import numpy as np
 from openseespy_solvers._base import LinearSolver
 from openseespy_solvers._factorization import apply_inner_factorization
 from openseespy_solvers.exceptions import InvalidOpenSeesDataError
+
+
+@functools.cache
+def _signature_parameters(func: Any) -> Any:
+    return inspect.signature(func).parameters
 
 
 def _iterative_kwargs(
@@ -23,7 +29,7 @@ def _iterative_kwargs(
     callback: Any | None,
     x0: Any | None,
 ) -> dict[str, Any]:
-    params = inspect.signature(func).parameters
+    params = _signature_parameters(func)
     kwargs: dict[str, Any] = {"maxiter": maxiter, "M": M}
     if callback is not None:
         kwargs["callback"] = callback
@@ -40,7 +46,10 @@ def _iterative_kwargs(
     if restart is not None and "restart" in params:
         kwargs["restart"] = restart
     if "callback_type" in params:
-        kwargs["callback_type"] = "legacy"
+        # scipy: 'legacy' calls back once per inner iteration. cupyx accepts only
+        # 'x' (per restart) or 'pr_norm' (per inner iteration).
+        module = getattr(func, "__module__", "") or ""
+        kwargs["callback_type"] = "pr_norm" if module.startswith("cupyx") else "legacy"
     return kwargs
 
 
@@ -73,13 +82,16 @@ class _Hybrid(LinearSolver):
             scheme=scheme,
             writable=writable,
             debug=debug,
+            record_stats=record_stats,
             preconditioner=None,
             dtype=dtype,
-            record_stats=record_stats,
         )
         self._inner = direct
         self.backend = direct.backend
         self._on_device = direct._on_device
+        # The matrix is built with the inner solver's hooks, so use its layout.
+        self._formats = direct._formats
+        self._accepts_lower = direct._accepts_lower
         self._rtol = rtol
         self._atol = atol
         self._restart = restart
@@ -87,6 +99,10 @@ class _Hybrid(LinearSolver):
         self._x0 = x0
         self._refresh_every = refresh_every
         self._frozen_n: int | None = None
+        # True from a STRUCTURE_CHANGED status until the inner solver has
+        # refactorized with STRUCTURE_CHANGED, so a fallback refactorization
+        # never reuses a symbolic analysis or matrix built for an old pattern.
+        self._pattern_changed = False
         self._has_factor = False
         self._step = 0
         self._last_x: Any | None = None
@@ -111,6 +127,9 @@ class _Hybrid(LinearSolver):
 
     def _update_matrix(self, matrix, values):  # noqa: ANN001
         return self._inner._update_matrix(matrix, values)
+
+    def _matrix_type_request(self):  # noqa: ANN202
+        return self._inner._matrix_type_request()
 
     def _to_device(self, array):  # noqa: ANN001
         return self._inner._to_device(array)
@@ -158,6 +177,7 @@ class _Hybrid(LinearSolver):
             refactor=refactor,
             on_device=self._on_device,
             structure_changed=structure_changed,
+            native=True,
         )
 
     def _solve_system(self, A, b, M, matrix_status):  # noqa: ANN001
@@ -165,7 +185,11 @@ class _Hybrid(LinearSolver):
         if n == 0:
             return b, 0, None
 
-        structure_changed = self._frozen_n is not None and self._frozen_n != n
+        if matrix_status == "STRUCTURE_CHANGED":
+            self._pattern_changed = True
+        structure_changed = (
+            self._pattern_changed or self._frozen_n is None or self._frozen_n != n
+        )
         need_factor = (
             self._frozen_n != n or not self._has_factor or self._force_refresh()
         )
@@ -185,8 +209,9 @@ class _Hybrid(LinearSolver):
                 A,
                 b,
                 refactor=True,
-                structure_changed=structure_changed or self._frozen_n is None,
+                structure_changed=structure_changed,
             )
+            self._pattern_changed = False
             self._has_factor = True
             self._frozen_n = n
             self._last_x = result
@@ -234,6 +259,7 @@ class _Hybrid(LinearSolver):
                 refactor=True,
                 structure_changed=structure_changed,
             )
+            self._pattern_changed = False
             self._has_factor = True
             self._frozen_n = n
             self._last_x = result

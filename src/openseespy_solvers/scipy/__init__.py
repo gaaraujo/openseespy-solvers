@@ -188,6 +188,9 @@ class _GMRES(ScipyMixin, LinearSolver):
 
 
 class _SpSolve(ScipyMixin, LinearSolver):
+    # SuperLU factorizes CSC; other schemes are mapped once per pattern.
+    _formats = ("CSC",)
+
     def __init__(
         self,
         *,
@@ -219,11 +222,15 @@ class _SpSolve(ScipyMixin, LinearSolver):
 
     def _solve_system(self, A, b, M, matrix_status):  # noqa: ANN001
         if matrix_status != "UNCHANGED" or self._solve_func is None:
-            self._solve_func = spla.splu(A.tocsc(), permc_spec=self._permc_spec).solve
+            self._solve_func = spla.splu(A, permc_spec=self._permc_spec).solve
         return self._solve_func(b), 0, None
 
 
 class _Umfpack(ScipyMixin, LinearSolver):
+    # UMFPACK factorizes CSC; other schemes are mapped once per pattern, so
+    # A.tocsc() below returns A itself and its values are shared, not copied.
+    _formats = ("CSC",)
+
     def __init__(
         self,
         *,
@@ -396,12 +403,12 @@ class _Lobpcg(ScipyMixin, EigenSolver):
             "dtype": dtype,
         }
 
-    def solve(self, **kwargs: Any) -> None:
+    def solve(self, **kwargs: Any) -> int:
         status = kwargs["matrix_status"]
         self._eigen_matrix_status = status
         if status != "UNCHANGED":
             self._preconditioner_cached = None
-        super().solve(**kwargs)
+        return super().solve(**kwargs)
 
     def _resolve_preconditioner(self, K: Any) -> Any | None:
         M = self._preconditioner
@@ -447,7 +454,9 @@ def spsolve(
     r"""Configure a sparse direct solver for OpenSees ``PythonSparse``.
 
     Uses :func:`scipy.sparse.linalg.splu` internally. The LU factorization is
-    reused when OpenSees reports ``matrix_status='UNCHANGED'``.
+    reused when OpenSees reports ``matrix_status='UNCHANGED'``. SuperLU works on
+    CSC, so the default ``scheme`` is ``'CSC'`` (OpenSees then stores CSC and no
+    conversion is needed); other schemes are mapped once per sparsity pattern.
 
     Parameters
     ----------
@@ -466,11 +475,11 @@ def spsolve(
     >>> solver = spsolve(permc_spec="COLAMD")
     >>> cfg = solver.to_openseespy()
     >>> cfg["scheme"]
-    'CSR'
+    'CSC'
     """
     return _SpSolve(
         permc_spec=permc_spec,
-        scheme=scheme or "CSR",
+        scheme=scheme or "CSC",
         writable=writable,
         debug=debug,
         dtype=dtype,

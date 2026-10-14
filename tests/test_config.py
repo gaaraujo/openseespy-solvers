@@ -13,8 +13,10 @@ def test_to_openseespy_linear_defaults() -> None:
     solver = spsolve()
     cfg = solver.to_openseespy()
     assert cfg["solver"] is solver
-    assert cfg["scheme"] == "CSR"
+    # Direct CPU solvers factorize CSC, so they ask OpenSees for CSC.
+    assert cfg["scheme"] == "CSC"
     assert cfg["writable"] == "none"
+    assert cg().to_openseespy()["scheme"] == "CSR"
 
 
 def test_to_openseespy_umfpack_defaults() -> None:

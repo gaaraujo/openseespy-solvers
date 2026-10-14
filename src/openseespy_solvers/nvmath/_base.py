@@ -159,6 +159,7 @@ class NvMathMixin:
     """Implements backend hooks for nvmath.sparse direct solvers (CPU or GPU sparse)."""
 
     backend = "nvmath"
+    _formats = ("CSR",)
 
     def __init__(
         self,
@@ -169,6 +170,7 @@ class NvMathMixin:
     ) -> None:
         self._nvmath = _import_nvmath()
         self._sp_module, self._on_device = _resolve_sp_module(sp_module, device=device)
+        self._values_staging: Any | None = None
         if self._on_device:
             import cupy as cp
 
@@ -190,42 +192,67 @@ class NvMathMixin:
         shape: tuple[int, int],
         fmt: str,
     ) -> Any:
-        spm = self._sp_module
+        if fmt != "CSR":
+            raise UnsupportedStorageSchemeError(f"nvmath backend expects CSR, got {fmt!r}")
         if self._on_device:
             cp = self._np_module
-            data = cp.asarray(values, dtype=self._cupy_dtype)
-            ind = cp.asarray(indices, dtype=cp.int32)
-            ptr = cp.asarray(indptr, dtype=cp.int32)
-            if fmt == "CSR":
-                matrix = spm.csr_matrix((data, ind, ptr), shape=shape)
-            elif fmt == "CSC":
-                matrix = spm.csc_matrix((data, ind, ptr), shape=shape).tocsr()
-            else:
-                raise UnsupportedStorageSchemeError(
-                    f"nvmath backend does not support scheme {fmt!r}"
-                )
-            return matrix
-
-        if fmt == "CSR":
-            matrix = spm.csr_matrix(
-                (values.copy(), indices.copy(), indptr.copy()), shape=shape
+            self._values_staging = cp.empty(values.shape[0], dtype=cp.float64)
+            return self._sp_module.csr_matrix(
+                (
+                    cp.asarray(values, dtype=self._cupy_dtype),
+                    cp.asarray(indices, dtype=cp.int32),
+                    cp.asarray(indptr, dtype=cp.int32),
+                ),
+                shape=shape,
             )
-        elif fmt == "CSC":
-            matrix = spm.csc_matrix(
-                (values.copy(), indices.copy(), indptr.copy()), shape=shape
-            ).tocsr()
-        else:
-            raise UnsupportedStorageSchemeError(
-                f"nvmath backend does not support scheme {fmt!r}"
-            )
-        return matrix
+        return self._sp_module.csr_matrix(
+            (
+                np.array(values, dtype=self._compute_dtype),
+                np.array(indices, dtype=np.int32),
+                np.array(indptr, dtype=np.int32),
+            ),
+            shape=shape,
+        )
 
     def _update_matrix(self, matrix: Any, values: np.ndarray) -> Any:
         if self._on_device:
-            matrix.data[:] = self._np_module.asarray(values, dtype=self._cupy_dtype)
+            # One host-to-device copy into a preallocated buffer; any cast to
+            # float32 then runs on the device.
+            staging = self._values_staging
+            staging.set(np.ascontiguousarray(values, dtype=np.float64))
+            if matrix.data.dtype == staging.dtype:
+                matrix.data[...] = staging
+            else:
+                matrix.data[...] = staging.astype(matrix.data.dtype)
         else:
-            matrix.data[:] = np.asarray(values, dtype=self._compute_dtype)
+            matrix.data[...] = values
         return matrix
+
+    # -- persistent device buffers ---------------------------------------
+
+    def _rhs_to_compute(self, rhs: np.ndarray) -> Any:
+        """Copy the OpenSees RHS into one preallocated device buffer."""
+        if not self._on_device:
+            return np.asarray(rhs, dtype=self._compute_dtype)
+        cp = self._np_module
+        buf = getattr(self, "_rhs_device", None)
+        if buf is None or buf.shape[0] != rhs.shape[0]:
+            buf = cp.empty(rhs.shape[0], dtype=self._cupy_dtype)
+            self._rhs_device = buf
+        if buf.dtype == np.float64:
+            buf.set(np.ascontiguousarray(rhs))
+        else:
+            buf.set(np.ascontiguousarray(rhs, dtype=buf.dtype))
+        return buf
+
+    def _write_opensees_buffer(self, buf: np.ndarray, value: Any) -> None:
+        """Device-to-host copy straight into the OpenSees buffer."""
+        if not self._on_device or not hasattr(value, "get"):
+            buf[:] = np.asarray(self._to_host(value), dtype=np.float64)
+            return
+        if value.dtype != np.float64:
+            value = value.astype(np.float64)
+        value.ravel().get(out=buf)
 
     def _to_device(self, array: np.ndarray) -> Any:
         if self._on_device:

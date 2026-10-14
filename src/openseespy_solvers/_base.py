@@ -1,35 +1,50 @@
 """Base solver classes for the OpenSees PythonSparse interfaces.
 
-These bases own the parts that are *identical for every backend*: wrapping the
-OpenSees memoryviews, the ``matrix_status`` caching pattern, writing the solution
-in place, statistics, ``formAp``, ``to_openseespy`` and ``copy`` support.
+These bases own the parts that are *identical for every backend*: reading the
+OpenSees memoryviews, mapping OpenSees' sparse layout onto the layout a backend
+wants (:class:`~openseespy_solvers._sparse.Layout`), the ``matrix_status``
+caching pattern, writing the solution in place, statistics, error reporting,
+``formAp``, ``to_openseespy`` and ``copy`` support.
 
 Backend-specific numerics are provided by small hooks that each namespace
 (``openseespy_solvers.scipy``, ``.cupy``, ...) implements:
 
-* ``_build_matrix`` / ``_update_matrix`` - assemble the cached sparse matrix
+* ``_build_matrix`` / ``_update_matrix`` - assemble the cached sparse matrix from
+  values already in backend order
 * ``_to_device`` / ``_to_host`` - host<->device transfer (identity on CPU)
 * ``_matvec`` - ``A @ v``
 * ``_is_sparse`` / ``_is_linear_operator`` - preconditioner detection
 * ``_solve_system`` (linear) / ``_solve_eigen`` (eigen) - the actual library call
 
-A backend that does not fit this shape (e.g. a distributed PETSc backend) can
-override ``solve`` directly; nothing here is mandatory beyond the hooks a given
-solver uses.
+and two class attributes:
+
+* ``_formats`` - compressed formats the backend accepts, in order of preference
+  (``None``: CSR or CSC, preferring whatever OpenSees sends)
+* ``_accepts_lower`` - whether the backend can use the lower triangle of a
+  symmetric matrix directly
+
+A backend that does not fit this shape can override ``solve`` directly.
 """
 
 from __future__ import annotations
 
 import copy
 import time
+import warnings
 from abc import ABC, abstractmethod
 from typing import Any
 
 import numpy as np
 
 from openseespy_solvers._dtype import OPENSEES_BUFFER_DTYPE, resolve_compute_dtype
-from openseespy_solvers._sparse import parse_eigen_values, parse_sparse_arrays
-from openseespy_solvers.exceptions import InvalidOpenSeesDataError
+from openseespy_solvers._sparse import (
+    SYMMETRIC_LOWER,
+    Layout,
+    plan_layout,
+    read_values,
+    read_vector,
+)
+from openseespy_solvers.exceptions import InvalidOpenSeesDataError, SolverWarning
 from openseespy_solvers.stats import EigenSolverStats, LinearSolverStats
 
 
@@ -46,6 +61,11 @@ class BaseOpenSeesSolver(ABC):
     backend: str = "base"
     #: Whether matrices/vectors live on a device (GPU) rather than host memory.
     _on_device: bool = False
+    #: Compressed formats the backend accepts, in order of preference. ``None``
+    #: accepts CSR and CSC and keeps whichever OpenSees sends.
+    _formats: tuple[str, ...] | None = None
+    #: Whether the backend can use a lower-triangle (symmetric) matrix directly.
+    _accepts_lower: bool = False
 
     def __init__(
         self,
@@ -59,6 +79,7 @@ class BaseOpenSeesSolver(ABC):
         self.debug = debug
         self.record_stats = record_stats
         self._compute_dtype = resolve_compute_dtype(dtype)
+        self._layout: Layout | None = None
         self._matrix: Any | None = None
         self._k_matrix: Any | None = None
         self._m_matrix: Any | None = None
@@ -75,11 +96,14 @@ class BaseOpenSeesSolver(ABC):
         shape: tuple[int, int],
         fmt: str,
     ) -> Any:
-        """Build a new sparse matrix in the backend's format (owns its data)."""
+        """Build a new sparse matrix in the backend's format (owns its data).
+
+        ``values`` are in ``fmt`` order and already cast to the compute dtype.
+        """
 
     @abstractmethod
     def _update_matrix(self, matrix: Any, values: np.ndarray) -> Any:
-        """Refresh coefficients (in place where possible) and return the matrix."""
+        """Refresh coefficients in place (``values`` in backend order, float64)."""
 
     @abstractmethod
     def _to_device(self, array: np.ndarray) -> Any:
@@ -95,6 +119,10 @@ class BaseOpenSeesSolver(ABC):
 
     # -- OpenSees config -------------------------------------------------
 
+    def _matrix_type_request(self) -> str | None:
+        """``'SYMMETRIC_LOWER'`` when this solver asks OpenSees for lower storage."""
+        return None
+
     def to_openseespy(
         self,
         *,
@@ -105,7 +133,7 @@ class BaseOpenSeesSolver(ABC):
 
         Parameters
         ----------
-        scheme : {'CSR', 'CSC'}, optional
+        scheme : {'CSR', 'CSC', 'COO'}, optional
             Sparse storage scheme. Default is the value given at construction.
         writable : str or list of str, optional
             Writable buffers declared to OpenSees. Overrides the constructor
@@ -115,8 +143,14 @@ class BaseOpenSeesSolver(ABC):
         -------
         config : dict
             Dictionary with keys ``solver``, ``scheme``, and optionally
-            ``writable``. Pass directly to ``ops.system('PythonSparse', ...)``
-            or ``ops.eigen('PythonSparse', ...)``.
+            ``writable`` and ``matrix_type``. Pass directly to
+            ``ops.system('PythonSparse', ...)`` or ``ops.eigen('PythonSparse', ...)``.
+
+        Notes
+        -----
+        ``matrix_type`` is included only for solvers built with
+        ``symmetric=True``. OpenSees builds without lower-triangle storage
+        ignore the key and send the full matrix, which the solver detects.
 
         Examples
         --------
@@ -134,6 +168,9 @@ class BaseOpenSeesSolver(ABC):
             cfg["writable"] = _normalize_writable(writable)
         elif hasattr(self, "writable"):
             cfg["writable"] = _normalize_writable(self.writable)
+        matrix_type = self._matrix_type_request()
+        if matrix_type is not None:
+            cfg["matrix_type"] = matrix_type
         return cfg
 
     # -- matrix caching --------------------------------------------------
@@ -144,34 +181,67 @@ class BaseOpenSeesSolver(ABC):
     def _write_opensees_buffer(self, buf: np.ndarray, value: Any) -> None:
         buf[:] = np.asarray(self._to_host(value), dtype=OPENSEES_BUFFER_DTYPE)
 
+    def _plan_layout(self, kwargs: dict[str, Any]) -> Layout:
+        scheme = kwargs.get("storage_scheme", "CSR")
+        formats = self._formats
+        if formats is None:
+            formats = ("CSC", "CSR") if scheme == "CSC" else ("CSR", "CSC")
+        return plan_layout(kwargs, formats=formats, accepts_lower=self._accepts_lower)
+
+    @property
+    def symmetric_storage(self) -> bool:
+        """``True`` when the cached matrix holds only the lower triangle."""
+        return self._layout is not None and self._layout.lower
+
+    def _new_matrix(self, values: np.ndarray) -> Any:
+        layout = self._layout
+        return self._build_matrix(
+            self._values_for_compute(layout.reorder(values)),
+            layout.indices,
+            layout.indptr,
+            layout.shape,
+            layout.fmt,
+        )
+
     def _current_matrix(self, kwargs: dict[str, Any], *, values_key: str = "values") -> Any:
-        arrays = parse_sparse_arrays(kwargs, values_key=values_key)
-        values = self._values_for_compute(arrays.values)
+        # The O(nnz) value buffer is read only when OpenSees reports a change,
+        # so an UNCHANGED solve costs O(n).
         status = kwargs["matrix_status"]
         if status == "STRUCTURE_CHANGED" or self._matrix is None:
-            self._matrix = self._build_matrix(
-                values, arrays.indices, arrays.indptr, arrays.shape, arrays.fmt
-            )
+            self._layout = self._plan_layout(kwargs)
+            self._matrix = self._new_matrix(read_values(kwargs, values_key))
         elif status == "COEFFICIENTS_CHANGED":
+            values = self._layout.reorder(read_values(kwargs, values_key))
             self._matrix = self._update_matrix(self._matrix, values)
         return self._matrix
 
     def _current_eigen_matrices(self, kwargs: dict[str, Any]) -> tuple[Any, Any]:
-        arrays = parse_sparse_arrays(kwargs, values_key="k_values")
-        k_values = self._values_for_compute(arrays.values)
-        m_values = self._values_for_compute(parse_eigen_values(kwargs))
         status = kwargs["matrix_status"]
+        if status == "UNCHANGED" and self._k_matrix is not None:
+            return self._k_matrix, self._m_matrix
         if status == "STRUCTURE_CHANGED" or self._k_matrix is None:
-            self._k_matrix = self._build_matrix(
-                k_values, arrays.indices, arrays.indptr, arrays.shape, arrays.fmt
+            self._layout = self._plan_layout(kwargs)
+            self._k_matrix = self._new_matrix(read_values(kwargs, "k_values"))
+            self._m_matrix = self._new_matrix(read_values(kwargs, "m_values"))
+        else:
+            layout = self._layout
+            self._k_matrix = self._update_matrix(
+                self._k_matrix, layout.reorder(read_values(kwargs, "k_values"))
             )
-            self._m_matrix = self._build_matrix(
-                m_values, arrays.indices, arrays.indptr, arrays.shape, arrays.fmt
+            self._m_matrix = self._update_matrix(
+                self._m_matrix, layout.reorder(read_values(kwargs, "m_values"))
             )
-        elif status == "COEFFICIENTS_CHANGED":
-            self._k_matrix = self._update_matrix(self._k_matrix, k_values)
-            self._m_matrix = self._update_matrix(self._m_matrix, m_values)
         return self._k_matrix, self._m_matrix
+
+    # -- error reporting -------------------------------------------------
+
+    def _report_failure(self, where: str, exc: BaseException) -> None:
+        """Emit the exception text (OpenSees only sees a negative status)."""
+        warnings.warn(
+            f"{type(self).__name__}.{where} failed: {type(exc).__name__}: {exc}",
+            SolverWarning,
+            stacklevel=3,
+        )
 
     # -- copy ------------------------------------------------------------
 
@@ -195,13 +265,18 @@ class LinearSolver(BaseOpenSeesSolver, ABC):
     Attributes
     ----------
     A : sparse matrix or None
-        Cached system matrix from the last :meth:`solve` or :meth:`formAp` call.
+        Cached system matrix from the last :meth:`solve` or :meth:`formAp` call,
+        in the backend's preferred format (which may differ from ``scheme``).
     b : ndarray
         Right-hand side from the last :meth:`solve` call.
     x : ndarray
         Last solution vector.
     stats : LinearSolverStats
-        Runtime statistics updated after each :meth:`solve`.
+        Runtime statistics, updated after each :meth:`solve` when the solver was
+        constructed with ``record_stats=True``. The relative residual
+        (``stats.last_residual_norm``) costs one extra sparse matrix-vector
+        product per solve and is computed only when ``record_stats`` and
+        ``debug`` are both ``True``.
     """
 
     stats: LinearSolverStats
@@ -216,9 +291,7 @@ class LinearSolver(BaseOpenSeesSolver, ABC):
         dtype: Any = np.float64,
         record_stats: bool = False,
     ) -> None:
-        super().__init__(
-            scheme=scheme, debug=debug, dtype=dtype, record_stats=record_stats
-        )
+        super().__init__(scheme=scheme, debug=debug, dtype=dtype, record_stats=record_stats)
         self.writable = _normalize_writable(writable)
         self._preconditioner = preconditioner
         self._preconditioner_cached: Any | None = None
@@ -252,6 +325,18 @@ class LinearSolver(BaseOpenSeesSolver, ABC):
             return self._preconditioner_cached
         return M
 
+    def _symmetric_matvec(self, A: Any, v: Any) -> Any:
+        """``A @ v`` for the full matrix when ``A`` holds only its lower triangle."""
+        if not self.symmetric_storage:
+            return self._matvec(A, v)
+        lower = self._matvec(A, v)
+        upper = self._matvec(A.T, v)
+        diag = A.diagonal() * v
+        return lower + upper - diag
+
+    def _rhs_to_compute(self, rhs: np.ndarray) -> Any:
+        return self._to_device(np.asarray(rhs, dtype=self._compute_dtype))
+
     def solve(self, **kwargs: Any) -> int:
         """Solve ``Ax = b`` using buffers supplied by OpenSees.
 
@@ -263,13 +348,14 @@ class LinearSolver(BaseOpenSeesSolver, ABC):
         **kwargs
             OpenSees ``PythonSparse`` buffers, including ``values``, ``rhs``,
             ``x``, ``num_eqn``, ``nnz``, ``matrix_status``, and
-            ``storage_scheme``.
+            ``storage_scheme`` (and ``matrix_type`` on builds that support it).
 
         Returns
         -------
         info : int
-            ``0`` if the solve succeeded; a negative value otherwise. When
-            ``debug=True``, failures raise the underlying exception instead.
+            ``0`` if the solve succeeded; a negative value otherwise. Failures
+            emit a :class:`~openseespy_solvers.exceptions.SolverWarning` with the
+            exception text; with ``debug=True`` the exception is raised instead.
         """
         try:
             matrix_status = kwargs["matrix_status"]
@@ -278,11 +364,11 @@ class LinearSolver(BaseOpenSeesSolver, ABC):
                 raise InvalidOpenSeesDataError("Linear solve requires rhs and x buffers")
 
             A = self._current_matrix(kwargs)
-            rhs = np.frombuffer(kwargs["rhs"], dtype=OPENSEES_BUFFER_DTYPE, count=num_eqn)
-            x_buf = np.frombuffer(kwargs["x"], dtype=OPENSEES_BUFFER_DTYPE, count=num_eqn)
+            rhs = read_vector(kwargs, "rhs")
+            x_buf = read_vector(kwargs, "x")
 
             self._A = A
-            b = self._to_device(np.asarray(rhs, dtype=self._compute_dtype))
+            b = self._rhs_to_compute(rhs)
             self._b = b
 
             M = self._resolve_preconditioner(A, matrix_status)
@@ -294,9 +380,11 @@ class LinearSolver(BaseOpenSeesSolver, ABC):
             self._x = result if self._on_device else x_buf
 
             residual = None
-            # Residual SpMV doubles matvec work; only with record_stats+debug.
+            # The residual doubles the matvec work; only with record_stats + debug.
             if self.record_stats and self.debug and num_eqn > 0:
-                ax = np.asarray(self._to_host(self._matvec(A, result)), dtype=OPENSEES_BUFFER_DTYPE)
+                ax = np.asarray(
+                    self._to_host(self._symmetric_matvec(A, result)), dtype=OPENSEES_BUFFER_DTYPE
+                )
                 r = rhs - ax
                 norm_b = float(np.linalg.norm(rhs))
                 residual = (
@@ -316,20 +404,22 @@ class LinearSolver(BaseOpenSeesSolver, ABC):
                 self.stats.last_error = exc
             if self.debug:
                 raise
+            self._report_failure("solve", exc)
             return -1
 
     def formAp(self, **kwargs: Any) -> int:
         try:
-            num_eqn = int(kwargs["num_eqn"])
             if "p" not in kwargs or "Ap" not in kwargs:
                 raise InvalidOpenSeesDataError("formAp requires p and Ap buffers")
 
             A = self._current_matrix(kwargs)
             self._A = A
-            p = np.frombuffer(kwargs["p"], dtype=OPENSEES_BUFFER_DTYPE, count=num_eqn)
-            ap_buf = np.frombuffer(kwargs["Ap"], dtype=OPENSEES_BUFFER_DTYPE, count=num_eqn)
+            p = read_vector(kwargs, "p")
+            ap_buf = read_vector(kwargs, "Ap")
 
-            result = self._matvec(A, self._to_device(np.asarray(p, dtype=self._compute_dtype)))
+            result = self._symmetric_matvec(
+                A, self._to_device(np.asarray(p, dtype=self._compute_dtype))
+            )
             self._write_opensees_buffer(ap_buf, result)
             return 0
         except Exception as exc:
@@ -337,6 +427,7 @@ class LinearSolver(BaseOpenSeesSolver, ABC):
                 self.stats.last_error = exc
             if self.debug:
                 raise
+            self._report_failure("formAp", exc)
             return -1
 
     @abstractmethod
@@ -379,24 +470,39 @@ class EigenSolver(BaseOpenSeesSolver, ABC):
     def M(self) -> Any | None:
         return self._M
 
-    def solve(self, **kwargs: Any) -> None:
-        num_modes = int(kwargs["num_modes"])
-        num_eqn = int(kwargs["num_eqn"])
-        find_smallest = bool(kwargs["find_smallest"])
+    def solve(self, **kwargs: Any) -> int:
+        """Solve ``K phi = lambda M phi`` using buffers supplied by OpenSees.
 
-        eigenvalues_buf = np.frombuffer(
-            kwargs["eigenvalues"], dtype=OPENSEES_BUFFER_DTYPE, count=num_modes
-        )
-        eigenvectors_buf = np.frombuffer(
-            kwargs["eigenvectors"], dtype=OPENSEES_BUFFER_DTYPE, count=num_modes * num_eqn
-        )
-
-        K, M = self._current_eigen_matrices(kwargs)
-        self._K = K
-        self._M = M
-
+        Returns
+        -------
+        info : int
+            ``0`` on success, ``-1`` on failure (with a
+            :class:`~openseespy_solvers.exceptions.SolverWarning`). With
+            ``debug=True`` the exception is raised instead.
+        """
         start = time.perf_counter()
         try:
+            num_modes = int(kwargs["num_modes"])
+            num_eqn = int(kwargs["num_eqn"])
+            find_smallest = bool(kwargs["find_smallest"])
+            if kwargs.get("storage_scheme", "CSR") == "COO":
+                raise InvalidOpenSeesDataError(
+                    "Eigen solvers support scheme='CSR' or 'CSC' (the OpenSees COO "
+                    "eigen interface returns lists and is not supported here)."
+                )
+
+            eigenvalues_buf = np.frombuffer(
+                kwargs["eigenvalues"], dtype=OPENSEES_BUFFER_DTYPE, count=num_modes
+            )
+            eigenvectors_buf = np.frombuffer(
+                kwargs["eigenvectors"], dtype=OPENSEES_BUFFER_DTYPE, count=num_modes * num_eqn
+            )
+
+            K, M = self._current_eigen_matrices(kwargs)
+            self._K = K
+            self._M = M
+
+            start = time.perf_counter()
             eigvals, eigvecs = self._solve_eigen(
                 K, M, num_modes=num_modes, find_smallest=find_smallest
             )
@@ -420,10 +526,15 @@ class EigenSolver(BaseOpenSeesSolver, ABC):
             self.stats.last_info = 0
             self.stats.last_eigenvalues = eigvals_host[:num_modes].copy()
             self.stats.last_error = None
+            return 0
         except Exception as exc:
             self.stats.last_error = exc
             self.stats.last_info = -1
-            raise
+            self.stats.last_solve_time = time.perf_counter() - start
+            if self.debug:
+                raise
+            self._report_failure("solve", exc)
+            return -1
 
     @abstractmethod
     def _solve_eigen(
@@ -435,3 +546,7 @@ class EigenSolver(BaseOpenSeesSolver, ABC):
         find_smallest: bool,
     ) -> tuple[Any, Any]:
         """Return (eigenvalues, eigenvectors) with eigenvectors column-major."""
+
+
+# Re-exported for backends that need to know whether a request was honoured.
+__all__ = ["BaseOpenSeesSolver", "EigenSolver", "LinearSolver", "SYMMETRIC_LOWER"]

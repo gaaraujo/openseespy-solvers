@@ -31,7 +31,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-opensees = ["openseespy"]
+# PythonSparse is in OpenSeesPy since 3.8.0.
+opensees = ["openseespy>=3.8.0"]
 # Prefer cuda12/cuda13 for GPU installs. The generic cupy extra is kept for users
 # who intentionally want cupy's source-build package.
 cupy = ["cupy>=13.0"]
@@ -88,3 +89,6 @@ select = ["E", "F", "I", "N", "UP", "B"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "gpu: needs a CUDA GPU with cupy/nvmath (run locally; deselect with -m 'not gpu')",
+]

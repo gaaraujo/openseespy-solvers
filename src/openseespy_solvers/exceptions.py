@@ -10,7 +10,8 @@ class OpenSeesSolverError(Exception):
 class UnsupportedStorageSchemeError(OpenSeesSolverError, NotImplementedError):
     """Sparse storage scheme is not supported.
 
-    Raised when ``storage_scheme`` is not ``'CSR'`` or ``'CSC'``.
+    Raised when ``storage_scheme`` is not ``'CSR'``, ``'CSC'`` or ``'COO'``, or
+    when a solver does not support the scheme it was given.
     """
 
 
@@ -32,4 +33,13 @@ class BackendNotAvailableError(OpenSeesSolverError, ImportError):
     For example, importing :mod:`openseespy_solvers.cupy` without `cupy` raises
     this exception. Install the CUDA 13 extra, for example
     ``python -m pip install "openseespy-solvers[cuda13]"``.
+    """
+
+
+class SolverWarning(UserWarning):
+    """A solve called by OpenSees failed.
+
+    OpenSees only sees the negative status code, so the exception text is
+    reported through :mod:`warnings`. Pass ``debug=True`` to a solver
+    constructor to raise the exception instead.
     """

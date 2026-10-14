@@ -19,6 +19,7 @@ def apply_inner_factorization(
     refactor: bool,
     on_device: bool,
     structure_changed: bool = False,
+    native: bool = False,
 ) -> Any:
     """Apply ``inner`` direct solver's factorization of ``matrix`` to ``vec``.
 
@@ -43,6 +44,11 @@ def apply_inner_factorization(
     structure_changed : bool, optional
         When ``refactor`` is ``True``, use ``STRUCTURE_CHANGED`` instead of
         ``COEFFICIENTS_CHANGED``.
+    native : bool, optional
+        ``True`` when ``matrix`` was built by ``inner``'s own ``_build_matrix``
+        hook (as in :func:`~openseespy_solvers.hybrid`). The matrix and ``vec``
+        then go straight to ``inner._solve_system``, with no re-marshalling or
+        host round trip; this runs once per GMRES iteration.
 
     Returns
     -------
@@ -58,6 +64,19 @@ def apply_inner_factorization(
         matrix_status = "STRUCTURE_CHANGED" if structure_changed else "COEFFICIENTS_CHANGED"
     else:
         matrix_status = "UNCHANGED"
+
+    if native:
+        if on_device:
+            rhs = vec.astype(inner._cupy_dtype, copy=False).ravel()
+        else:
+            rhs = np.asarray(vec, dtype=inner._compute_dtype).ravel()
+        result, info, _ = inner._solve_system(matrix, rhs, None, matrix_status)
+        if info != 0:
+            raise SolverConvergenceError(
+                f"Inner direct solve failed with info={info} (matrix_status={matrix_status!r})"
+            )
+        # Some backends return an internal buffer that the next solve overwrites.
+        return result.copy()
 
     if on_device:
         rhs = inner._to_device(np.asarray(_host_array(vec), dtype=inner._compute_dtype))
@@ -76,7 +95,7 @@ def apply_inner_factorization(
         rhs_host,
         matrix_status=matrix_status,
         x=x_host,
-        scheme=getattr(inner, "scheme", "CSR") or "CSR",
+        scheme="CSC" if getattr(inner, "scheme", "CSR") == "CSC" else "CSR",
     )
     info = inner.solve(**lin_kwargs)
     if info != 0:

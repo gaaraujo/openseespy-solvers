@@ -10,6 +10,7 @@ from openseespy_solvers.exceptions import (
     InvalidOpenSeesDataError,
     OpenSeesSolverError,
     SolverConvergenceError,
+    SolverWarning,
     UnsupportedComputeDtypeError,
     UnsupportedStorageSchemeError,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "InvalidOpenSeesDataError",
     "OpenSeesSolverError",
     "SolverConvergenceError",
+    "SolverWarning",
     "UnsupportedComputeDtypeError",
     "UnsupportedStorageSchemeError",
     "__version__",

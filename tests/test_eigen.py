@@ -127,8 +127,14 @@ def test_cupy_eigsh_diagonal_rejects_offdiag_mass() -> None:
     )
     M = sp.csr_matrix((np.ones(K.nnz), K.indices, K.indptr), shape=(n, n))
     kwargs = csr_eigen_kwargs(K, M, num_modes=2, find_smallest=True)
+    from openseespy_solvers import SolverWarning
+
+    # Like linear solves, a failed eigen solve returns a negative status with a
+    # warning; debug=True raises the exception instead.
+    with pytest.warns(SolverWarning, match="mass_mode='diagonal' requires a diagonal mass"):
+        assert cupy_eigsh(mass_mode="diagonal").solve(**kwargs) == -1
     with pytest.raises(ValueError, match="mass_mode='diagonal' requires a diagonal mass matrix"):
-        cupy_eigsh(mass_mode="diagonal").solve(**kwargs)
+        cupy_eigsh(mass_mode="diagonal", debug=True).solve(**kwargs)
 
 
 def test_cupy_eigsh_lumped_allows_offdiag_mass() -> None:

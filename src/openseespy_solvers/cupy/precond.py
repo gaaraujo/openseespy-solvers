@@ -189,6 +189,9 @@ def direct(solver: LinearSolver):
                 rhs,
                 refactor=needs_refactor,
                 on_device=False,
+                # Each preconditioner is built for a new matrix, whose pattern
+                # may differ from the one the inner solver analysed last.
+                structure_changed=needs_refactor,
             )
             needs_refactor = False
             return cp.asarray(result, dtype=dtype)

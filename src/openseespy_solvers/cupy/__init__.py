@@ -57,7 +57,7 @@ from openseespy_solvers._sparse import (
     eigsh_arpack_kwargs,
     opensees_eigsh_sigma,
 )
-from openseespy_solvers.cupy._base import CupyMixin, _import_cupy
+from openseespy_solvers.cupy._base import CupyMixin, _import_cupy, _signature_parameters
 from openseespy_solvers.exceptions import SolverConvergenceError
 
 # Fail fast at import time if cupy is unavailable.
@@ -207,7 +207,7 @@ class _GMRES(CupyMixin, LinearSolver):
             M=M,
             callback=callback,
         )
-        if "restart" in inspect.signature(self._cspla.gmres).parameters:
+        if "restart" in _signature_parameters(self._cspla.gmres):
             kwargs["restart"] = self._restart
         if self._x0 is not None:
             kwargs["x0"] = self._to_device(self._x0)
@@ -216,6 +216,10 @@ class _GMRES(CupyMixin, LinearSolver):
 
 
 class _SpSolve(CupyMixin, LinearSolver):
+    # cupyx splu copies the matrix to the host and factorizes it there with
+    # SuperLU (CSC); only the triangular solves run on the GPU.
+    _formats = ("CSC",)
+
     def __init__(
         self,
         *,
@@ -247,7 +251,7 @@ class _SpSolve(CupyMixin, LinearSolver):
 
     def _solve_system(self, A, b, M, matrix_status):  # noqa: ANN001
         if matrix_status != "UNCHANGED" or self._solve_func is None:
-            self._solve_func = self._cspla.splu(A.tocsc(), permc_spec=self._permc_spec).solve
+            self._solve_func = self._cspla.splu(A, permc_spec=self._permc_spec).solve
         return self._solve_func(b), 0, None
 
 
@@ -286,12 +290,12 @@ class _Lobpcg(CupyMixin, EigenSolver):
             "dtype": dtype,
         }
 
-    def solve(self, **kwargs: Any) -> None:
+    def solve(self, **kwargs: Any) -> int:
         status = kwargs["matrix_status"]
         self._eigen_matrix_status = status
         if status != "UNCHANGED":
             self._preconditioner_cached = None
-        super().solve(**kwargs)
+        return super().solve(**kwargs)
 
     def _resolve_preconditioner(self, K: Any) -> Any | None:
         M = self._preconditioner
@@ -374,7 +378,7 @@ class _Eigsh(CupyMixin, EigenSolver):
             "dtype": dtype,
         }
 
-    def solve(self, **kwargs: Any) -> None:
+    def solve(self, **kwargs: Any) -> int:
         status = kwargs["matrix_status"]
         self._eigen_matrix_status = status
         if status == "STRUCTURE_CHANGED":
@@ -387,7 +391,7 @@ class _Eigsh(CupyMixin, EigenSolver):
             self._shift_sigma = None
             self._diag_m = None
             self._inner_needs_refactor = True
-        super().solve(**kwargs)
+        return super().solve(**kwargs)
 
     def _shifted_stiffness_diagonal_mass(self, K, m, sigma: float):  # noqa: ANN001
         if (
@@ -615,7 +619,7 @@ def spsolve(
     """
     return _SpSolve(
         permc_spec=permc_spec,
-        scheme=scheme or "CSR",
+        scheme=scheme or "CSC",
         writable=writable,
         debug=debug,
         dtype=dtype,
