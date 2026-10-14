@@ -716,7 +716,11 @@ def gmres(
     restart : int, optional
         Number of iterations between restarts. Default is ``20``.
     maxiter : int, optional
-        Maximum number of iterations.
+        Maximum **total** number of iterations, as in
+        :func:`cupyx.scipy.sparse.linalg.gmres` (rounded up to a whole restart
+        cycle). Note that :func:`openseespy_solvers.scipy.gmres` counts restart
+        cycles instead: ``restart=50, maxiter=40`` allows 2000 iterations there
+        but stops CuPy after one cycle.
     M : {sparse matrix, LinearOperator, callable}, optional
         Preconditioner for ``A``.
     callback : callable, optional

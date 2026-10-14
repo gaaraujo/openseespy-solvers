@@ -317,7 +317,9 @@ def hybrid(
     restart : int, optional
         GMRES restart length.
     maxiter : int, optional
-        Maximum GMRES iterations.
+        Maximum GMRES iterations, with the semantics of the device's GMRES: restart
+        cycles on the CPU (:func:`scipy.sparse.linalg.gmres`), total iterations on
+        the GPU (:func:`cupyx.scipy.sparse.linalg.gmres`).
     x0 : ndarray, optional
         Initial guess for GMRES. When omitted, the previous solution is reused
         when the system size is unchanged.
