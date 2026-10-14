@@ -22,7 +22,9 @@ All cached attributes are `None` until the first `solve` (or `formAp` for `A`).
 
 `A`
 : `scipy.sparse.spmatrix` or `cupyx.scipy.sparse.spmatrix` — cached system
-  matrix from the last solve or `formAp` call.
+  matrix from the last solve or `formAp` call, in the format the backend
+  factorizes (CSC for `spsolve`/`umfpack`, CSR for nvmath), which may differ
+  from `scheme`. With symmetric storage it holds only the lower triangle.
 
 `b`
 : `numpy.ndarray` (CPU backends) or `cupy.ndarray` (GPU) — 1-D right-hand
@@ -55,10 +57,11 @@ All cached attributes are `None` until the first `solve` (or `formAp` for `A`).
 but reset internal cache and statistics. OpenSees uses this when cloning a
 system of equations.
 
-## Compute precision (`dtype`) *(experimental)*
+## Errors and statistics
 
-Set `debug=True` at construction to propagate exceptions from `solve` and
-`formAp` instead of returning a negative status code (linear solvers only).
+A failed solve returns a negative status to OpenSees and emits a
+`SolverWarning` with the exception text. Set `debug=True` at construction to
+raise the exception instead (linear and eigen solvers).
 
 Set `record_stats=True` to update `solver.stats` after each linear solve.
 Relative residual (`last_residual_norm`) is computed only when both
@@ -69,6 +72,28 @@ Relative residual (`last_residual_norm`) is computed only when both
 Every solver constructor accepts ``dtype`` (default ``numpy.float64``). Supported values are
 ``float32`` and ``float64``. The internal sparse solve, matrix cache (``A``,
 ``K``, ``M``), and right-hand sides use that precision.
+
+## Symmetric tangents
+
+`pardiso(matrix_type='symmetric' | 'spd')` and
+`nvmath.direct_solver(matrix_type='symmetric' | 'spd')` use LDL^T or Cholesky
+and ask OpenSees to store only the lower triangle, which halves the values
+copied per coefficient update. Use them only when the tangent is symmetric
+(elastic, most plasticity with associated flow, no frictional contact or
+follower loads). OpenSees builds without lower-triangle storage send the full
+matrix; the factorization type still applies.
+
+## Iterative solver tolerances
+
+The smallest relative residual an iterative solver can reach is set by
+round-off in the assembled tangent; on typical structural models a direct LU
+solve itself stops near 1e-12 to 1e-11. Requesting `rtol` at or below that
+level makes restarted GMRES or CG run to `maxiter` and report failure. Values
+around `rtol=1e-8` give solutions that agree with a direct solve to about
+1e-10 on such models. Inside Newton iterations the linear tolerance is the
+inexact-Newton forcing term: a fixed tolerance gives linear convergence of
+the Newton loop, so prefer a direct solver (or a tight tolerance) when the
+Newton iteration count matters.
 
 ## See also
 

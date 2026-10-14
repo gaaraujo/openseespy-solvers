@@ -13,6 +13,10 @@ OpenSees calls `solver.solve(**kwargs)`.
 `index_ptr`, `indices`, `values`
 : CSR/CSC sparse structure and coefficients.
 
+`row`, `col`
+: COO structure (`scheme='COO'`) instead of `index_ptr`/`indices`. Entries are
+  ordered by row, then column, so they are also in CSR order.
+
 `rhs`, `x`
 : Right-hand side and solution buffers. `x` is overwritten.
 
@@ -23,12 +27,31 @@ OpenSees calls `solver.solve(**kwargs)`.
 : One of `'STRUCTURE_CHANGED'`, `'COEFFICIENTS_CHANGED'`, `'UNCHANGED'`.
 
 `storage_scheme`
-: `'CSR'` or `'CSC'`. Default is `'CSR'`.
+: `'CSR'`, `'CSC'` or `'COO'`. Default is `'CSR'`.
+
+`matrix_type`
+: Only when the configuration dict requested it (see below):
+  `'SYMMETRIC_LOWER'` means the buffers hold only the lower triangle
+  (row >= column). Builds without this option ignore the key and send the full
+  matrix without `matrix_type`; solvers in this package handle both.
+
+**Optional dictionary keys** (newer OpenSees builds; older builds ignore them)
+
+`'matrix_type': 'SYMMETRIC_LOWER'`
+: Store and send only the lower triangle of a symmetric tangent (halves the
+  values buffer). Requested automatically by `pardiso(matrix_type=...)` and
+  `nvmath.direct_solver(matrix_type=...)` with `'symmetric'` or `'spd'`.
+
+`'typed': True`
+: Memoryviews with format `'i'`/`'d'` instead of raw bytes, so
+  `np.asarray(values)` works directly. Off by default (it changes `len()` and
+  `memoryview.cast()` on the views).
 
 **Returns**
 
-`0` if the solve succeeded; a negative integer otherwise. Set `debug=True` on
-the solver to re-raise the underlying exception.
+`0` (or `None`) if the solve succeeded; a negative integer otherwise. Failures
+emit a `SolverWarning` with the exception text; set `debug=True` on the solver
+to raise the exception instead.
 
 ## Eigen solve
 
@@ -37,7 +60,8 @@ OpenSees calls `solver.solve(**kwargs)` for eigen analysis.
 Additional keyword arguments: `k_values`, `m_values`, `eigenvalues`,
 `eigenvectors`, `num_modes`, `find_smallest`.
 
-Eigen solvers raise on failure; they do not return a status code.
+Eigen solvers return `0` on success and `-1` on failure (with a
+`SolverWarning`), like linear solvers; `debug=True` raises instead.
 
 ## formAp
 
@@ -81,15 +105,22 @@ Eigen analysis follows the same split: OpenSees assembles **K** and **M** on the
 solver object runs ARPACK, LOBPCG, or shift-invert on CPU and/or GPU depending on the
 solver constructor you choose.
 
-This package does **not** support parallel or MPI OpenSeesPy builds where the model
-is partitioned across processes. `PythonSparse` callbacks always run in the same
-process that owns the model.
+**Partitioned (MPI) models.** OpenSeesPy builds with parallel interpreters
+provide `system('DistributedPythonSparse', solver.to_openseespy())` and
+`eigen('DistributedPythonSparse', n, ...)`. Every rank runs the same script and
+builds the same solver object; worker ranks send their part of the RHS and
+their matrix contributions to rank 0, only rank 0 calls the solver, and the
+solution is sent back. Nothing else changes in the script. Constructors in this
+package allocate nothing on the GPU until the first solve, so worker ranks never
+touch the device. `'PythonSparse'` itself stays serial on every build, so
+scripts that run independent models per rank are unaffected. No PyPI wheel
+includes the MPI build yet.
 
 **Where parallelism exists today**
 
 | Layer | Behavior |
 |-------|----------|
-| OpenSees model pipeline | Serial (single CPU process) |
+| OpenSees model pipeline | Serial (single CPU process), or partitioned across MPI ranks with `DistributedPythonSparse` (solve on rank 0) |
 | scipy backends ([`spsolve`](../api/scipy.md#openseespy_solvers.scipy.spsolve), [`cg`](../api/scipy.md#openseespy_solvers.scipy.cg), [`eigsh`](../api/scipy.md#openseespy_solvers.scipy.eigsh), …) | CPU linear algebra; may use multithreaded BLAS/LAPACK inside scipy/UMFPACK |
 | cupy / nvmath backends | **GPU** factorization, iterative solve, or eigen iteration; matrix assembly still happens on the CPU in OpenSees, with host↔device transfers inside the solver |
 
