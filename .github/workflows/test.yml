@@ -24,3 +24,25 @@ jobs:
         run: ruff check src tests
       - name: Pytest
         run: pytest
+
+  # Real OpenSeesPy (current PyPI wheel): Newton loops through every CPU solver
+  # for CSR, CSC and COO, a nonsymmetric tangent, coefficient updates and the
+  # hybrid fallback. GPU tests (marker "gpu") run locally only.
+  opensees:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package with OpenSeesPy
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,opensees]"
+      - name: OpenSeesPy version
+        run: python -c "import openseespy.opensees as ops; print(ops.version())"
+      - name: Pytest (OpenSees end-to-end, no GPU)
+        run: pytest -m "not gpu" tests/test_opensees_integration.py tests/test_examples.py
