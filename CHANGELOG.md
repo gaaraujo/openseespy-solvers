@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PARDISO through a small ctypes binding (needs only the MKL runtime). Calls
   the analysis / factorization / solve phases directly according to
   `matrix_status`; symmetric types read the lower-triangle storage directly.
+- `scipy.eigsh(linear_solver=...)`: shift-invert through any package direct
+  solver (`pardiso()`, `umfpack()`, ...). The shifted matrix is factorized once
+  per change of K/M; each Lanczos iteration is one triangular solve.
 - `scheme="COO"` for linear solvers (OpenSees' COO entries are already in CSR
   order, so no reordering is needed).
 - `nvmath.direct_solver(matrix_type="symmetric" | "spd")`: LDL^T / Cholesky in

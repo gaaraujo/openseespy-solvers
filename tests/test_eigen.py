@@ -237,3 +237,45 @@ def test_lobpcg_diagonal() -> None:
     solver = lobpcg(maxiter=40, tol=1e-8)
     solver.solve(**kwargs)
     np.testing.assert_allclose(ev, [2.0, 4.0], rtol=1e-5)
+
+
+def _eigsh_linear_solvers():
+    from openseespy_solvers.scipy import spsolve
+
+    out = [("spsolve", spsolve)]
+    try:
+        from openseespy_solvers.scipy import umfpack
+
+        umfpack()
+        out.append(("umfpack", umfpack))
+    except ImportError:
+        pass
+    try:
+        from openseespy_solvers.scipy import pardiso
+        from openseespy_solvers.scipy._pardiso import load_mkl
+
+        load_mkl()
+        out.append(("pardiso", pardiso))
+        out.append(("pardiso-sym", lambda: pardiso(matrix_type="symmetric")))
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+@pytest.mark.parametrize("name,factory", _eigsh_linear_solvers(),
+                         ids=lambda v: v if isinstance(v, str) else "")
+def test_eigsh_shift_invert_with_package_linear_solver(name, factory) -> None:
+    from openseespy_solvers.scipy import eigsh
+
+    n = 40
+    K = sp.diags([np.full(n - 1, -1.0), np.full(n, 2.0), np.full(n - 1, -1.0)], [-1, 0, 1],
+                 format="csr")
+    M = sp.csr_matrix((np.where(K.indices == np.repeat(np.arange(n), np.diff(K.indptr)), 1.5, 0.0),
+                       K.indices, K.indptr), shape=(n, n))
+    default, custom = eigsh(), eigsh(linear_solver=factory())
+    for status, scale in (("STRUCTURE_CHANGED", 1.0), ("COEFFICIENTS_CHANGED", 3.0)):
+        kw1 = csr_eigen_kwargs(K * scale, M, num_modes=3, matrix_status=status)
+        kw2 = csr_eigen_kwargs(K * scale, M, num_modes=3, matrix_status=status)
+        assert default.solve(**kw1) == 0 and custom.solve(**kw2) == 0
+        np.testing.assert_allclose(np.frombuffer(kw2["eigenvalues"]),
+                                   np.frombuffer(kw1["eigenvalues"]), rtol=1e-9)

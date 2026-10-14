@@ -41,6 +41,7 @@ from openseespy_solvers._docstrings import (
     _OPENSEES_EIGEN,
     _OPENSEES_LINEAR,
 )
+from openseespy_solvers._factorization import FactorizedOperator
 from openseespy_solvers._sparse import (
     OPENSEES_EIGSH_WHICH,
     eigsh_arpack_kwargs,
@@ -418,11 +419,18 @@ class _Eigsh(ScipyMixin, EigenSolver):
         maxiter: int | None = None,
         tol: float = 0.0,
         mode: str = "normal",
+        linear_solver: LinearSolver | None = None,
         scheme: str = "CSR",
         debug: bool = False,
         dtype: Any = np.float64,
     ) -> None:
         super().__init__(scheme=scheme, debug=debug, dtype=dtype)
+        if linear_solver is not None and not isinstance(linear_solver, LinearSolver):
+            raise TypeError("linear_solver must be a LinearSolver (e.g. pardiso(), umfpack())")
+        self._linear_solver = linear_solver
+        self._eigen_status: str | None = None
+        self._opinv: Any | None = None
+        self._opinv_sigma: float | None = None
         self._sigma = sigma
         self._which = which
         self._v0 = v0
@@ -438,6 +446,7 @@ class _Eigsh(ScipyMixin, EigenSolver):
             "maxiter": maxiter,
             "tol": tol,
             "mode": mode,
+            "linear_solver": linear_solver,
             "scheme": scheme,
             "debug": debug,
             "dtype": dtype,
@@ -457,7 +466,26 @@ class _Eigsh(ScipyMixin, EigenSolver):
         sigma = opensees_eigsh_sigma(find_smallest, self._sigma)
         if sigma is not None:
             kwargs["sigma"] = sigma
+            if self._linear_solver is not None:
+                kwargs["OPinv"] = self._shift_invert_operator(K, M, sigma)
         return spla.eigsh(K, **kwargs)
+
+    def solve(self, **kwargs: Any) -> int:
+        if kwargs.get("matrix_status") == "STRUCTURE_CHANGED":
+            self._opinv = None
+        self._eigen_status = kwargs.get("matrix_status")
+        return super().solve(**kwargs)
+
+    def _shift_invert_operator(self, K, M, sigma: float):  # noqa: ANN001, ANN202
+        """(K - sigma M)^{-1} through ``linear_solver``, factorized once per change."""
+        shifted = (K - sigma * M).tocsr()
+        if self._opinv is None or self._opinv.shape != shifted.shape or self._opinv_sigma != sigma:
+            self._opinv = FactorizedOperator(self._linear_solver.copy(), shifted)
+            self._opinv_sigma = sigma
+        elif self._eigen_status != "UNCHANGED":
+            self._opinv.update(shifted)
+        op = self._opinv
+        return spla.LinearOperator(shifted.shape, matvec=op.matvec, dtype=np.float64)
 
 
 class _Lobpcg(ScipyMixin, EigenSolver):
@@ -834,6 +862,7 @@ def eigsh(
     maxiter: int | None = None,
     tol: float = 0.0,
     mode: str = "normal",
+    linear_solver: LinearSolver | None = None,
     scheme: str | None = None,
     debug: bool = False,
     dtype: Any = np.float64,
@@ -864,6 +893,11 @@ def eigsh(
         Convergence tolerance. Default is ``0.0``.
     mode : {'normal', 'buckling', 'cayley'}, optional
         Eigenproblem mode. Default is ``'normal'``.
+    linear_solver : LinearSolver, optional
+        Direct solver for the shift-invert operator ``(K - sigma M)^{-1}``, for
+        example :func:`pardiso` or :func:`umfpack`. It factorizes once per
+        change of ``K``/``M`` and each Lanczos iteration costs one triangular
+        solve. Default: SciPy's internal SuperLU factorization.
     """ + _OPENSEES_EIGEN + _EIGEN_RETURNS + _EIGEN_NOTES + """
     See Also
     --------
@@ -885,6 +919,7 @@ def eigsh(
         maxiter=maxiter,
         tol=tol,
         mode=mode,
+        linear_solver=linear_solver,
         scheme=scheme or "CSR",
         debug=debug,
         dtype=dtype,

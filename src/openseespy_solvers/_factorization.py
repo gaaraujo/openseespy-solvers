@@ -104,3 +104,65 @@ def apply_inner_factorization(
         )
     solution = np.frombuffer(lin_kwargs["x"], dtype=np.float64, count=n).copy()
     return inner._to_device(solution)
+
+
+class FactorizedOperator:
+    """``x = A^{-1} v`` through a package direct solver, factorized once.
+
+    The matrix is handed to ``inner.solve`` once with ``STRUCTURE_CHANGED``
+    (or ``COEFFICIENTS_CHANGED`` after :meth:`update`); every later
+    application reuses the same buffers with ``matrix_status='UNCHANGED'``, so
+    it costs one triangular solve plus O(n) copies. Used as ``OPinv`` for
+    shift-invert eigen solves.
+
+    The marshalled layout follows the inner solver: CSC when its ``scheme`` is
+    ``'CSC'``, and only the lower triangle (``matrix_type='SYMMETRIC_LOWER'``)
+    when it requests symmetric storage, in which case ``A`` must be symmetric.
+    """
+
+    def __init__(self, inner: LinearSolver, matrix: Any) -> None:
+        self.inner = inner
+        self.lower = inner._matrix_type_request() == "SYMMETRIC_LOWER"
+        scheme = "CSC" if getattr(inner, "scheme", "CSR") == "CSC" else "CSR"
+        n = matrix.shape[0]
+        self._rhs = np.zeros(n, dtype=np.float64)
+        self._x = np.zeros(n, dtype=np.float64)
+        self._kwargs = csr_linear_kwargs_from_matrix(
+            sp_tril(matrix) if self.lower else matrix,
+            self._rhs,
+            matrix_status="STRUCTURE_CHANGED",
+            x=self._x,
+            scheme=scheme,
+        )
+        # Keep the marshalled arrays alive; the inner solver may reference them.
+        self._values = np.frombuffer(self._kwargs["values"], dtype=np.float64)
+        if self.lower:
+            self._kwargs["matrix_type"] = "SYMMETRIC_LOWER"
+        self._pending = "STRUCTURE_CHANGED"
+        self.shape = matrix.shape
+
+    def update(self, matrix: Any) -> None:
+        """New coefficients on the same pattern (refactorize on next use)."""
+        src = sp_tril(matrix) if self.lower else matrix
+        src = src.tocsc() if self._kwargs["storage_scheme"] == "CSC" else src.tocsr()
+        src.sort_indices()
+        self._values[:] = _host_array(src.data)
+        if self._pending != "STRUCTURE_CHANGED":
+            self._pending = "COEFFICIENTS_CHANGED"
+
+    def matvec(self, v: Any) -> np.ndarray:
+        self._rhs[:] = np.asarray(_host_array(v), dtype=np.float64).ravel()
+        self._kwargs["matrix_status"] = self._pending
+        info = self.inner.solve(**self._kwargs)
+        if info != 0:
+            raise SolverConvergenceError(
+                f"Inner direct solve failed with info={info} (matrix_status={self._pending!r})"
+            )
+        self._pending = "UNCHANGED"
+        return self._x.copy()
+
+
+def sp_tril(matrix: Any) -> Any:
+    import scipy.sparse as sp
+
+    return sp.tril(matrix)

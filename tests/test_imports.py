@@ -16,7 +16,9 @@ def test_version() -> None:
 
 
 def test_scipy_namespace_exports() -> None:
-    assert set(scipy_ns.__all__) == {"cg", "gmres", "spsolve", "umfpack", "pardiso", "eigsh", "lobpcg"}
+    assert set(scipy_ns.__all__) == {
+        "cg", "gmres", "spsolve", "umfpack", "pardiso", "eigsh", "lobpcg",
+    }
 
 
 def test_lazy_scipy_attribute() -> None:
