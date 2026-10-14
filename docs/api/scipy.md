@@ -15,6 +15,7 @@ Direct methods:
 |---------|----------------|-------------|
 | [`spsolve`](#openseespy_solvers.scipy.spsolve) | `scipy.sparse.linalg.spsolve` / `splu` | Sparse direct solver using SuperLU |
 | [`umfpack`](#openseespy_solvers.scipy.umfpack) | `scikits.umfpack` | Sparse direct solver using UMFPACK |
+| [`pardiso`](#openseespy_solvers.scipy.pardiso) | Intel MKL PARDISO | Sparse direct solver (LU, LDL^T or Cholesky) using MKL; needs the MKL runtime |
 
 Iterative methods:
 

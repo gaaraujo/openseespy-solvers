@@ -79,7 +79,7 @@ Tutorial and API docs cover wiring, alternatives, and optional backends:
 
 | Module | Provides |
 |--------|----------|
-| `openseespy_solvers.scipy` | CPU solvers: `spsolve`, `umfpack`, `cg`, `gmres`, `eigsh`, `lobpcg` |
+| `openseespy_solvers.scipy` | CPU solvers: `spsolve`, `umfpack`, `pardiso`, `cg`, `gmres`, `eigsh`, `lobpcg` |
 | `openseespy_solvers.scipy.precond` | CPU preconditioners: `jacobi`, `ilu`, `direct` |
 | `openseespy_solvers.cupy` | GPU solvers: `spsolve`, `cg`, `gmres`, `eigsh`, `lobpcg` |
 | `openseespy_solvers.cupy.precond` | GPU preconditioners: `jacobi`, `ilu`, `direct` |

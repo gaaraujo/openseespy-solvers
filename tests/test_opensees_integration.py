@@ -149,7 +149,21 @@ def _cpu_direct():
         factories["umfpack"] = umfpack
     except ImportError:
         pass
+    if _have_mkl():
+        from openseespy_solvers.scipy import pardiso
+
+        factories["pardiso"] = pardiso
     return factories
+
+
+def _have_mkl() -> bool:
+    try:
+        from openseespy_solvers.scipy._pardiso import load_mkl
+
+        load_mkl()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 @pytest.mark.parametrize("scheme", SCHEMES)
@@ -221,6 +235,31 @@ def test_symmetric_storage_request_is_safe_on_any_build(scheme) -> None:
     )
     expected = "SYMMETRIC_LOWER" if _supports_lower_storage() else None
     assert solver.types[0] == expected
+
+
+@pytest.mark.skipif(not _have_mkl(), reason="no MKL runtime")
+@pytest.mark.parametrize("matrix_type", ["symmetric", "spd"])
+@pytest.mark.parametrize("scheme", ["CSR", "CSC", "COO"])
+def test_cpu_pardiso_symmetric(matrix_type, scheme) -> None:
+    from openseespy_solvers.scipy import pardiso
+
+    solver = pardiso(matrix_type=matrix_type)
+    np.testing.assert_allclose(
+        run(brick_model, pythonsparse(solver, scheme), steps=2), reference(brick_model),
+        rtol=1e-9,
+    )
+
+
+@pytest.mark.skipif(not _have_mkl(), reason="no MKL runtime")
+def test_cpu_hybrid_pardiso_fallback() -> None:
+    from openseespy_solvers import hybrid
+    from openseespy_solvers.scipy import pardiso
+
+    solver = hybrid(pardiso(), rtol=1e-15, restart=1, maxiter=1, record_stats=True)
+    np.testing.assert_allclose(
+        run(contact_model, pythonsparse(solver, "CSR")), reference(contact_model),
+        rtol=1e-9, atol=1e-12,
+    )
 
 
 # -- GPU ----------------------------------------------------------------------

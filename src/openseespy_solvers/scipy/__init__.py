@@ -48,7 +48,7 @@ from openseespy_solvers._sparse import (
 )
 from openseespy_solvers.scipy._base import ScipyMixin, _import_umfpack
 
-__all__ = ["cg", "gmres", "spsolve", "umfpack", "eigsh", "lobpcg"]
+__all__ = ["cg", "gmres", "spsolve", "umfpack", "pardiso", "eigsh", "lobpcg"]
 
 
 class _CG(ScipyMixin, LinearSolver):
@@ -312,6 +312,98 @@ class _Umfpack(ScipyMixin, LinearSolver):
             self._csc = self._to_csc_umf(A)
             self._umf.numeric(self._csc)
         x = self._umf.solve(self._umfpack.UMFPACK_A, self._csc, rhs)
+        return x, 0, None
+
+
+class _Pardiso(ScipyMixin, LinearSolver):
+    _formats = ("CSR",)
+
+    def __init__(
+        self,
+        *,
+        matrix_type: str = "general",
+        num_threads: int | None = None,
+        iparm: dict[int, int] | None = None,
+        scheme: str = "CSR",
+        writable: str | list[str] = "none",
+        debug: bool = False,
+        dtype: Any = np.float64,
+        record_stats: bool = False,
+    ) -> None:
+        from openseespy_solvers.scipy import _pardiso
+
+        matrix_type = matrix_type.lower()
+        mtypes = {
+            "general": _pardiso.MTYPE_REAL_NONSYMMETRIC,
+            "symmetric": _pardiso.MTYPE_REAL_SYMMETRIC_INDEFINITE,
+            "spd": _pardiso.MTYPE_REAL_SPD,
+        }
+        if matrix_type not in mtypes:
+            raise ValueError(f"matrix_type must be one of {tuple(mtypes)}, got {matrix_type!r}")
+        if np.dtype(dtype) != np.float64:
+            raise ValueError("pardiso() supports dtype=float64 only")
+        super().__init__(
+            scheme=scheme,
+            writable=writable,
+            debug=debug,
+            preconditioner=None,
+            dtype=dtype,
+            record_stats=record_stats,
+        )
+        _pardiso.load_mkl()  # fail at construction if MKL is missing
+        self._pardiso = _pardiso
+        self._matrix_type = matrix_type
+        self._mtype = mtypes[matrix_type]
+        if matrix_type != "general":
+            # PARDISO's symmetric types read the upper triangle in CSR, whose
+            # arrays are exactly the lower triangle in CSC.
+            self._formats = ("CSC",)
+            self._lower_only = True
+        self._num_threads = num_threads
+        self._iparm = iparm
+        self._handle: Any | None = None
+        self._handle_matrix: Any | None = None
+        self._params = {
+            "matrix_type": matrix_type,
+            "num_threads": num_threads,
+            "iparm": iparm,
+            "scheme": scheme,
+            "writable": writable,
+            "debug": debug,
+            "dtype": dtype,
+            "record_stats": record_stats,
+        }
+
+    def _matrix_type_request(self) -> str | None:
+        return None if self._matrix_type == "general" else "SYMMETRIC_LOWER"
+
+    def cleanup(self) -> None:
+        """Release the PARDISO factorization."""
+        if self._handle is not None:
+            self._handle.release()
+        self._handle_matrix = None
+
+    def __copy__(self) -> _Pardiso:
+        return type(self)(**self._params)
+
+    def _solve_system(self, A, b, M, matrix_status):  # noqa: ANN001
+        n = A.shape[0]
+        if n == 0:
+            return np.asarray(b, dtype=np.float64), 0, None
+        if self._handle is None:
+            self._handle = self._pardiso.PardisoHandle(
+                self._mtype, num_threads=self._num_threads, iparm=self._iparm
+            )
+        if matrix_status == "STRUCTURE_CHANGED" or A is not self._handle_matrix:
+            # PARDISO keeps pointers to these arrays; A's buffers are updated in
+            # place on COEFFICIENTS_CHANGED, so they stay valid.
+            self._handle.analyze(A.data, A.indptr, A.indices, n)
+            self._handle.factorize()
+            self._handle_matrix = A
+        elif matrix_status == "COEFFICIENTS_CHANGED":
+            self._handle.factorize()
+        x = np.empty(n, dtype=np.float64)
+        self._handle.solve(np.ascontiguousarray(b, dtype=np.float64), x)
         return x, 0, None
 
 
@@ -664,6 +756,68 @@ def gmres(
         M=M,
         callback=callback,
         scheme=scheme or "CSR",
+        writable=writable,
+        debug=debug,
+        dtype=dtype,
+        record_stats=record_stats,
+    )
+
+
+def pardiso(
+    *,
+    matrix_type: str = "general",
+    num_threads: int | None = None,
+    iparm: dict[int, int] | None = None,
+    scheme: str | None = None,
+    writable: str | list[str] = "none",
+    debug: bool = False,
+    dtype: Any = np.float64,
+    record_stats: bool = False,
+) -> _Pardiso:
+    r"""Configure an Intel MKL PARDISO direct solver for OpenSees ``PythonSparse``.
+
+    Calls the PARDISO phases directly: analysis (11) on
+    ``matrix_status='STRUCTURE_CHANGED'``, numerical factorization (22) on
+    ``'COEFFICIENTS_CHANGED'``, and solve (33) on every call, so an
+    ``'UNCHANGED'`` solve costs only the triangular solves. Needs the MKL
+    runtime (``mkl_rt``) from conda ``mkl``, the ``mkl`` wheel, or Intel oneAPI;
+    no Python wrapper package is required.
+
+    Parameters
+    ----------
+    matrix_type : {'general', 'symmetric', 'spd'}, optional
+        ``'general'`` (LU, mtype 11) for any tangent; ``'symmetric'`` (LDL^T,
+        mtype -2) or ``'spd'`` (Cholesky, mtype 2) for symmetric tangents only.
+        Symmetric types ask OpenSees for the lower triangle
+        (``matrix_type='SYMMETRIC_LOWER'``), which PARDISO reads directly; older
+        OpenSees builds send the full matrix and its upper part is dropped once
+        per pattern. Default is ``'general'``.
+    num_threads : int, optional
+        MKL thread count (``MKL_Set_Num_Threads``). Default: MKL's setting.
+    iparm : dict of int to int, optional
+        Overrides for PARDISO ``iparm`` entries (zero-based index). The defaults
+        are METIS ordering, zero-based indexing, and scaling plus weighted
+        matching for ``'general'``.
+    """ + _OPENSEES_LINEAR + _LINEAR_RETURNS + _LINEAR_NOTES + """
+    Raises
+    ------
+    BackendNotAvailableError
+        If the MKL runtime cannot be loaded.
+
+    Examples
+    --------
+    >>> from openseespy_solvers.scipy import pardiso  # doctest: +SKIP
+    >>> solver = pardiso(matrix_type="symmetric")  # doctest: +SKIP
+    >>> solver.to_openseespy()["matrix_type"]  # doctest: +SKIP
+    'SYMMETRIC_LOWER'
+    """
+    if scheme is None:
+        scheme = "CSR" if matrix_type.lower() == "general" else "CSC"
+    return _Pardiso(
+        matrix_type=matrix_type,
+        num_threads=num_threads,
+        iparm=iparm,
+        scheme=scheme,
         writable=writable,
         debug=debug,
         dtype=dtype,

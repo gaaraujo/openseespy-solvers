@@ -82,3 +82,13 @@ def test_coefficient_update_uses_same_permutation() -> None:
     new = sp.csc_matrix(NONSYM * 3.0 + sp.csr_matrix(NONSYM.astype(bool)) * 0.5)
     new.sort_indices()
     np.testing.assert_allclose(rebuild(layout, new.data).toarray(), new.toarray())
+
+
+@pytest.mark.parametrize("scheme", ["CSR", "CSC", "COO"])
+@pytest.mark.parametrize("lower_input", [False, True])
+def test_lower_only_backend_gets_lower_triangle(scheme, lower_input) -> None:
+    """PARDISO-style backends: full input is reduced, lower input kept."""
+    kw = opensees_kwargs(SYM, scheme, lower=lower_input)
+    layout = plan_layout(kw, formats=("CSC",), lower_only=True)
+    assert layout.lower and layout.fmt == "CSC"
+    np.testing.assert_array_equal(rebuild(layout, kw["data"]).toarray(), sp.tril(SYM).toarray())

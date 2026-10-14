@@ -89,6 +89,7 @@ def plan_layout(
     *,
     formats: tuple[str, ...] = ("CSR", "CSC"),
     accepts_lower: bool = False,
+    lower_only: bool = False,
 ) -> Layout:
     """Plan how OpenSees values map onto a backend matrix.
 
@@ -102,14 +103,24 @@ def plan_layout(
         Whether the backend can use the lower triangle of a symmetric matrix
         directly. Otherwise a lower-triangle buffer is expanded to the full
         matrix.
+    lower_only : bool
+        The backend wants only the lower triangle (row >= col) of a symmetric
+        matrix, e.g. PARDISO's symmetric types. A full matrix (from an OpenSees
+        build without lower-triangle storage) is reduced to its lower triangle.
     """
     scheme = kwargs.get("storage_scheme", "CSR")
     n = int(kwargs["num_eqn"])
     nnz = int(kwargs["nnz"])
     lower = kwargs.get("matrix_type", GENERAL) == SYMMETRIC_LOWER
 
+    accepts_lower = accepts_lower or lower_only
     # Fast path: the OpenSees layout is already acceptable as is.
-    if scheme in formats and scheme in ("CSR", "CSC") and (accepts_lower or not lower):
+    if (
+        scheme in formats
+        and scheme in ("CSR", "CSC")
+        and (accepts_lower or not lower)
+        and (lower or not lower_only)
+    ):
         indptr = np.array(np.frombuffer(kwargs["index_ptr"], dtype=np.int32, count=n + 1))
         indices = np.array(np.frombuffer(kwargs["indices"], dtype=np.int32, count=nnz))
         return Layout(scheme, indptr, indices, (n, n), None, lower, nnz)
@@ -120,6 +131,9 @@ def plan_layout(
         # so positions are carried over without summation.
         pattern = (pattern + sp.tril(pattern, k=-1).T).tocsr()
         lower = False
+    if lower_only and not lower:
+        pattern = sp.tril(pattern)
+        lower = True
     fmt = formats[0]
     pattern = pattern.tocsr() if fmt == "CSR" else pattern.tocsc()
     pattern.sort_indices()

@@ -42,6 +42,7 @@ passing `solver.to_openseespy()` to `ops.system("PythonSparse", ...)` or
 |-------------|---------|---------|
 | [`scipy.spsolve`](scipy.md#openseespy_solvers.scipy.spsolve) | `scipy.sparse.linalg` / SuperLU | CPU sparse direct solve |
 | [`scipy.umfpack`](scipy.md#openseespy_solvers.scipy.umfpack) | scikit-umfpack | CPU sparse direct solve using UMFPACK |
+| [`scipy.pardiso`](scipy.md#openseespy_solvers.scipy.pardiso) | Intel MKL runtime | CPU sparse direct solve using PARDISO (LU, LDL^T, Cholesky) |
 | [`scipy.cg`](scipy.md#openseespy_solvers.scipy.cg) | `scipy.sparse.linalg` | CPU Conjugate Gradient |
 | [`scipy.gmres`](scipy.md#openseespy_solvers.scipy.gmres) | `scipy.sparse.linalg` | CPU GMRES |
 | [`cupy.spsolve`](cupy.md#openseespy_solvers.cupy.spsolve) | `cupyx.scipy.sparse.linalg` | CUDA sparse direct solve |

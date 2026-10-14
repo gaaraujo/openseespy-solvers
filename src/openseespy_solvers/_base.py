@@ -66,6 +66,9 @@ class BaseOpenSeesSolver(ABC):
     _formats: tuple[str, ...] | None = None
     #: Whether the backend can use a lower-triangle (symmetric) matrix directly.
     _accepts_lower: bool = False
+    #: Whether the backend wants only the lower triangle (drops the upper part
+    #: of a full matrix).
+    _lower_only: bool = False
 
     def __init__(
         self,
@@ -186,7 +189,12 @@ class BaseOpenSeesSolver(ABC):
         formats = self._formats
         if formats is None:
             formats = ("CSC", "CSR") if scheme == "CSC" else ("CSR", "CSC")
-        return plan_layout(kwargs, formats=formats, accepts_lower=self._accepts_lower)
+        return plan_layout(
+            kwargs,
+            formats=formats,
+            accepts_lower=self._accepts_lower,
+            lower_only=self._lower_only,
+        )
 
     @property
     def symmetric_storage(self) -> bool:
