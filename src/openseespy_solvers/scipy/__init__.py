@@ -182,6 +182,10 @@ class _GMRES(ScipyMixin, LinearSolver):
         }
         if callback is not None:
             kwargs["callback"] = callback
+            # 'pr_norm': one call per inner iteration with maxiter still counting
+            # restart cycles. SciPy's fallback, 'legacy', silently makes maxiter
+            # count inner iterations instead.
+            kwargs["callback_type"] = "pr_norm"
         if self._x0 is not None:
             kwargs["x0"] = np.asarray(self._x0, dtype=self._compute_dtype)
         result, info = spla.gmres(A, b, **kwargs)
@@ -757,14 +761,15 @@ def gmres(
     restart : int, optional
         Number of iterations between restarts.
     maxiter : int, optional
-        Maximum number of **restart cycles** (outer iterations), as in
+        Maximum number of restart cycles (outer iterations), as in
         :func:`scipy.sparse.linalg.gmres`; up to ``maxiter * restart`` iterations
-        in total. Note that :func:`openseespy_solvers.cupy.gmres` counts total
-        iterations instead.
+        in total. :func:`openseespy_solvers.cupy.gmres` and
+        :func:`openseespy_solvers.hybrid` use the same meaning.
     M : {sparse matrix, LinearOperator, callable}, optional
         Preconditioner for ``A``.
     callback : callable, optional
-        User-supplied function called after each iteration.
+        User-supplied function called after each inner iteration (no arguments).
+        The iteration count in ``solver.stats`` counts the same calls.
     """ + _OPENSEES_LINEAR + _LINEAR_RETURNS + _LINEAR_NOTES + """
     See Also
     --------

@@ -52,6 +52,7 @@ from openseespy_solvers._docstrings import (
     _OPENSEES_LINEAR,
 )
 from openseespy_solvers._factorization import apply_inner_factorization
+from openseespy_solvers._krylov import gmres_maxiter
 from openseespy_solvers._sparse import (
     OPENSEES_EIGSH_WHICH,
     eigsh_arpack_kwargs,
@@ -209,6 +210,9 @@ class _GMRES(CupyMixin, LinearSolver):
         )
         if "restart" in _signature_parameters(self._cspla.gmres):
             kwargs["restart"] = self._restart
+        # SciPy semantics (restart cycles) -> cupyx (total iterations).
+        kwargs["maxiter"] = gmres_maxiter(self._cspla.gmres, self._maxiter, self._restart,
+                                          A.shape[0])
         if self._x0 is not None:
             kwargs["x0"] = self._to_device(self._x0)
         result, info = self._cspla.gmres(A, b, **kwargs)
@@ -716,15 +720,24 @@ def gmres(
     restart : int, optional
         Number of iterations between restarts. Default is ``20``.
     maxiter : int, optional
-        Maximum **total** number of iterations, as in
-        :func:`cupyx.scipy.sparse.linalg.gmres` (rounded up to a whole restart
-        cycle). Note that :func:`openseespy_solvers.scipy.gmres` counts restart
-        cycles instead: ``restart=50, maxiter=40`` allows 2000 iterations there
-        but stops CuPy after one cycle.
+        Maximum number of restart cycles, with the same meaning as in
+        :func:`openseespy_solvers.scipy.gmres` (up to ``maxiter * restart``
+        iterations). ``None`` keeps CuPy's default.
+
+        .. note::
+           :func:`cupyx.scipy.sparse.linalg.gmres` itself counts *total*
+           iterations. This factory converts the value (``maxiter * restart``)
+           so that the same settings mean the same thing on CPU and GPU;
+           passing ``maxiter`` straight to ``cupyx`` with ``restart=50,
+           maxiter=40`` would stop after one cycle.
     M : {sparse matrix, LinearOperator, callable}, optional
         Preconditioner for ``A``.
     callback : callable, optional
-        User-supplied function called after each iteration.
+        User-supplied function called after each **restart cycle** (no
+        arguments): :func:`cupyx.scipy.sparse.linalg.gmres` has no
+        per-iteration callback, so on the GPU the iteration count in
+        ``solver.stats`` counts restart cycles (CPU GMRES counts inner
+        iterations).
     """ + _OPENSEES_LINEAR + _LINEAR_RETURNS + _LINEAR_NOTES + """
     See Also
     --------

@@ -276,3 +276,47 @@ def test_residual_opt_in_record_stats() -> None:
     assert residual is not None
     assert np.isfinite(residual)
     assert residual < 1e-10
+
+
+def test_gmres_maxiter_translation() -> None:
+    from openseespy_solvers._krylov import gmres_maxiter
+
+    def fake(name):
+        f = lambda: None  # noqa: E731
+        f.__module__ = name
+        return f
+
+    scipy_fn = fake("scipy.sparse.linalg._isolve._gcrotmk")
+    cupy_fn = fake("cupyx.scipy.sparse.linalg._iterative")
+    assert gmres_maxiter(scipy_fn, 40, 50, 10_000) == 40
+    assert gmres_maxiter(cupy_fn, 40, 50, 10_000) == 2000
+    assert gmres_maxiter(cupy_fn, 40, None, 10_000) == 800  # cupyx default restart 20
+    assert gmres_maxiter(cupy_fn, 3, 50, 10) == 30  # restart capped at n
+    assert gmres_maxiter(cupy_fn, None, 50, 100) is None
+
+
+def _diag_dominant(n=200):
+    return sp.diags([-1.0, 4.0, -1.5], [-1, 0, 1], shape=(n, n)).tocsr()
+
+
+@pytest.mark.parametrize("backend", ["scipy", "cupy"])
+def test_gmres_maxiter_counts_restart_cycles(backend) -> None:
+    """restart=5, maxiter=10 allows 50 iterations on CPU and GPU alike."""
+    if backend == "cupy":
+        pytest.importorskip("cupy")
+    import importlib
+
+    factory = importlib.import_module(f"openseespy_solvers.{backend}").gmres
+    A = _diag_dominant()
+    b = np.ones(A.shape[0])
+    x_buf = np.zeros(A.shape[0], dtype=np.float64)
+    count = {"n": 0}
+
+    def cb():
+        count["n"] += 1
+    solver = factory(rtol=1e-10, restart=5, maxiter=10, callback=cb, record_stats=True)
+    assert solver.solve(**csr_linear_kwargs(A.toarray(), b, x=x_buf)) == 0
+    np.testing.assert_allclose(A @ x_buf, b, rtol=1e-8, atol=1e-8)
+    # needed more than one restart cycle: scipy counts inner iterations, cupyx
+    # calls back once per restart cycle
+    assert count["n"] > (5 if backend == "scipy" else 1)

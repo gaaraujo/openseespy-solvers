@@ -10,6 +10,7 @@ import numpy as np
 
 from openseespy_solvers._base import LinearSolver
 from openseespy_solvers._factorization import apply_inner_factorization
+from openseespy_solvers._krylov import gmres_maxiter
 from openseespy_solvers.exceptions import InvalidOpenSeesDataError
 
 
@@ -46,10 +47,11 @@ def _iterative_kwargs(
     if restart is not None and "restart" in params:
         kwargs["restart"] = restart
     if "callback_type" in params:
-        # scipy: 'legacy' calls back once per inner iteration. cupyx accepts only
-        # 'x' (per restart) or 'pr_norm' (per inner iteration).
-        module = getattr(func, "__module__", "") or ""
-        kwargs["callback_type"] = "pr_norm" if module.startswith("cupyx") else "legacy"
+        # 'pr_norm' on both: scipy calls back once per inner iteration and keeps
+        # maxiter in restart cycles ('legacy' would make maxiter count inner
+        # iterations); cupyx calls back once per restart cycle (it has no
+        # per-iteration callback).
+        kwargs["callback_type"] = "pr_norm"
     return kwargs
 
 
@@ -248,6 +250,8 @@ class _Hybrid(LinearSolver):
             callback=callback,
             x0=x0,
         )
+        # SciPy semantics (restart cycles) on either device.
+        kwargs["maxiter"] = gmres_maxiter(gmres_fn, self._maxiter, self._restart, n)
         result, info = gmres_fn(A, b, **kwargs)
         if self.record_stats:
             self.stats.num_gmres_solves += 1
@@ -317,9 +321,12 @@ def hybrid(
     restart : int, optional
         GMRES restart length.
     maxiter : int, optional
-        Maximum GMRES iterations, with the semantics of the device's GMRES: restart
-        cycles on the CPU (:func:`scipy.sparse.linalg.gmres`), total iterations on
-        the GPU (:func:`cupyx.scipy.sparse.linalg.gmres`).
+        Maximum number of GMRES restart cycles (SciPy's meaning), on CPU and GPU
+        alike: up to ``maxiter * restart`` iterations.
+
+        .. note::
+           On the GPU the value is converted to the total-iteration count that
+           :func:`cupyx.scipy.sparse.linalg.gmres` expects.
     x0 : ndarray, optional
         Initial guess for GMRES. When omitted, the previous solution is reused
         when the system size is unchanged.
