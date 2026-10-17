@@ -82,6 +82,15 @@ An Intel oneAPI installation also works. To use a specific library, set
 `OPENSEESPY_SOLVERS_MKL_RT` to its full path. If `mkl_rt` cannot be loaded,
 `pardiso()` raises `BackendNotAvailableError` at construction.
 
+An OpenSeesPy that you build yourself against Intel oneAPI MKL with Intel
+threading loads oneAPI's OpenMP runtime (`libiomp5md.dll` on Windows). If
+`pardiso()` then loads `mkl_rt` from the `mkl` wheel, the process holds two
+copies of that runtime and aborts with `OMP: Error #15`. In that case, set
+`OPENSEESPY_SOLVERS_MKL_RT` to the oneAPI library that the build uses, for
+example `C:\Program Files (x86)\Intel\oneAPI\mkl\latest\bin\mkl_rt.2.dll`,
+and put the oneAPI `bin` directory on `PATH`. The `openseespy` wheel on PyPI
+does not have this conflict.
+
 ### NVIDIA GPU {#gpu}
 
 GPU solvers require an NVIDIA driver and CUDA-compatible wheels. Start by checking the CUDA

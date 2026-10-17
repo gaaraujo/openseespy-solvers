@@ -156,7 +156,9 @@ contains the OpenSees changes that `matrix_type`, `typed` and
 general, compiling OpenSeesPy from that branch gives access to these features
 before an OpenSees release includes them. The branch has not been merged into
 OpenSees, so it has had less testing than a release, and its behavior and
-interface may change in the final version.
+interface may change in the final version. It has been checked with the test
+suite of this package and the scripts in `EXAMPLES/PythonSparse` of that
+branch, on Windows and Linux (MPI on Linux only).
 
 - Serial OpenSeesPy: build the `OpenSeesPy` target as for any OpenSees build.
 - MPI OpenSeesPy (`DistributedPythonSparse`): configure with
@@ -169,6 +171,9 @@ put its directory on `sys.path`, and use `import opensees as ops` in place of
 `import openseespy.opensees as ops`. The end-to-end tests of this package
 (`tests/test_opensees_integration.py`) use such a build when
 `OPENSEESPY_PATH` is set to that directory.
+
+On Windows, a build linked to oneAPI MKL can conflict with the `mkl` wheel used
+by `pardiso()`; see [PARDISO](../installation.md#pardiso).
 
 ## See also
 
