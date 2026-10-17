@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openseespy-solvers"
-version = "0.2.0"
+version = "0.3.0"
 description = "scipy-style PythonSparse solvers for OpenSeesPy"
 readme = "README.md"
 requires-python = ">=3.12"

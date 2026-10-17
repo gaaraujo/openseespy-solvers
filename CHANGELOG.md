@@ -7,62 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-16
+
 ### Added
 
 - `scipy.pardiso(matrix_type="general" | "symmetric" | "spd")`: Intel MKL
-  PARDISO through a small ctypes binding (needs only the MKL runtime). Calls
-  the analysis / factorization / solve phases directly according to
-  `matrix_status`; symmetric types read the lower-triangle storage directly.
-- `scipy.eigsh(linear_solver=...)`: shift-invert through any package direct
-  solver (`pardiso()`, `umfpack()`, ...). The shifted matrix is factorized once
-  per change of K/M; each Lanczos iteration is one triangular solve.
-- `scheme="COO"` for linear solvers (OpenSees' COO entries are already in CSR
-  order, so no reordering is needed).
-- `nvmath.direct_solver(matrix_type="symmetric" | "spd")`: LDL^T / Cholesky in
-  cuDSS. These solvers ask OpenSees for lower-triangle storage
-  (`matrix_type="SYMMETRIC_LOWER"`), which halves the values copied to the GPU
-  on OpenSees builds that support it. Older builds ignore the key and send the
-  full matrix; the solver detects that per solve.
-- Lower-triangle buffers from OpenSees are accepted by every solver (expanded
-  once per pattern for backends that need the full matrix).
-- `SolverWarning`: failed solves always report the exception text.
-- End-to-end tests that run OpenSeesPy Newton loops (CSR/CSC/COO, nonsymmetric
-  tangent, hybrid fallback, cuDSS); GPU tests are marked `gpu`.
+  PARDISO through a ctypes binding; needs only the MKL runtime (`mkl_rt`).
+  Analysis runs on `STRUCTURE_CHANGED`, numerical factorization on
+  `COEFFICIENTS_CHANGED`, and only the solve phase on `UNCHANGED`.
+- `scipy.eigsh(linear_solver=...)`: shift-invert with a package direct solver
+  (for example `pardiso()` or `umfpack()`). `K - sigma M` is factorized once per
+  eigen call.
+- `nvmath.direct_solver(matrix_type="symmetric" | "spd")`: LDL^T or Cholesky
+  in cuDSS.
+- `scheme="COO"` for linear solvers.
+- Symmetric solvers request lower-triangle storage
+  (`"matrix_type": "SYMMETRIC_LOWER"` in the configuration dict), and every
+  solver accepts lower-triangle buffers. This storage requires a future
+  OpenSees release; the current `openseespy` wheel (3.8.0) ignores the key and
+  sends the full matrix, which the solvers detect on each solve.
+- `SolverWarning`: a failed solve reports the exception text.
+- Documentation for `DistributedPythonSparse` (MPI OpenSeesPy builds from a
+  future OpenSees release; not available in the 3.8.0 wheel) and for the
+  `openseespy-solvers` branch of gaaraujo/OpenSees, which provides the
+  unreleased OpenSees features ahead of an OpenSees release.
+- End-to-end tests with OpenSeesPy (CSR, CSC and COO, nonsymmetric tangents,
+  coefficient updates, `hybrid()` fallback, cuDSS) and a CI job that runs them
+  against the PyPI wheel. GPU tests are marked `gpu`.
 
 ### Changed
 
-- Each backend declares the compressed format it factorizes, and the mapping
-  from OpenSees' layout is computed once per sparsity pattern. SuperLU and
-  UMFPACK no longer convert CSR to CSC on every factorization (UMFPACK shares
-  the values array), and `spsolve()` / `cupy.spsolve()` ask OpenSees for CSC by
-  default, like `umfpack()`.
-- `UNCHANGED` solves no longer read or cast the O(nnz) value buffers.
+- GMRES `maxiter` counts restart cycles on the CPU and the GPU, as in SciPy.
+  `cupy.gmres` and `hybrid()` on the GPU convert it to the total iteration
+  count that `cupyx` expects.
+- The mapping from the OpenSees layout to the format each backend factorizes is
+  computed once per sparsity pattern. SuperLU and UMFPACK no longer convert CSR
+  to CSC on every factorization, and `spsolve()` and `cupy.spsolve()` default
+  to `scheme="CSC"`.
+- `UNCHANGED` solves no longer read or cast the matrix values.
 - GPU solvers reuse preallocated device buffers for the matrix values and the
-  right-hand side, keep cuDSS operand references across solves, and copy the
-  solution straight into the OpenSees buffer.
-- `EigenSolver.solve` returns `0`/`-1` like `LinearSolver.solve` instead of
+  right-hand side, and copy the solution directly into the OpenSees buffer.
+- `hybrid()` applies the frozen factorization without re-marshalling the
+  matrix or copying vectors through the host on each GMRES iteration.
+- `EigenSolver.solve` returns `0` or `-1` like `LinearSolver.solve` instead of
   raising; `debug=True` still raises.
-- `hybrid()` applies the frozen factorization directly, without re-marshalling
-  the matrix or copying vectors through the host on each GMRES iteration.
-- `cupy.spsolve` is documented as factorizing on the CPU (cupyx `splu` copies
-  the matrix to the host); use `nvmath.direct_solver` for GPU factorization.
-- `inspect.signature` lookups for iterative solvers are cached.
+- The `[cuda12]` and `[cuda13]` extras require `nvmath-python>=1.0.0`
+  (cuDSS 0.8).
 - The `[opensees]` extra requires `openseespy>=3.8.0`.
+- `cupy.spsolve` documents that `cupyx` `splu` factorizes on the CPU.
 
 ### Fixed
 
-- `nvmath.direct_solver(scheme="CSC")`: coefficient updates were written into the
-  converted CSR matrix in CSC order, which is wrong for nonsymmetric matrices.
-- `nvmath.direct_solver(device="gpu")`: every `COEFFICIENTS_CHANGED` solve failed
-  (returned -1) because resetting the GPU operand discarded the cuDSS plan.
-- `hybrid()`: the fallback refactorization after a GMRES failure passed
-  `COEFFICIENTS_CHANGED` for what could be a new sparsity pattern, so inner
-  solvers could factorize an outdated matrix or reuse a stale symbolic analysis.
-- `hybrid()` on the GPU: GMRES failed on every call because cupy does not accept
-  `callback_type="legacy"`.
-- `precond.direct()`: the first refactorization of each new preconditioner uses
-  `STRUCTURE_CHANGED`, for the same reason as the `hybrid()` fix.
-- Failed solves were silent unless `debug=True`; they now emit `SolverWarning`.
+- `nvmath.direct_solver(scheme="CSC")` wrote coefficient updates in CSC order
+  into a CSR matrix, which is wrong for nonsymmetric matrices.
+- `nvmath.direct_solver` on the GPU failed every `COEFFICIENTS_CHANGED` solve
+  because resetting the GPU operand discarded the cuDSS plan.
+- `hybrid()` refactorized after a GMRES failure with `COEFFICIENTS_CHANGED`
+  even when the sparsity pattern had changed.
+- `hybrid()` on the GPU failed on every call because `cupyx` gmres does not
+  accept `callback_type="legacy"`.
+- `scipy.gmres` with a callback counted `maxiter` in inner iterations instead
+  of restart cycles (SciPy's `legacy` callback type).
+- `precond.direct()` refactorized a new preconditioner with
+  `COEFFICIENTS_CHANGED` instead of `STRUCTURE_CHANGED`.
+- Failed solves were silent unless `debug=True`.
 
 ## [0.2.0] - 2026-08-06
 
