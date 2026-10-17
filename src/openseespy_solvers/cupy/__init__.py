@@ -599,8 +599,11 @@ def spsolve(
 ) -> _SpSolve:
     r"""Configure a sparse direct solver for OpenSees ``PythonSparse`` (GPU).
 
-    Uses :func:`cupyx.scipy.sparse.linalg.splu` internally. The LU factorization
-    is reused when OpenSees reports ``matrix_status='UNCHANGED'``.
+    Uses :func:`cupyx.scipy.sparse.linalg.splu` internally. ``splu`` copies the
+    matrix to the host and factorizes it with SciPy's SuperLU; the triangular
+    solves then run on the GPU. For a factorization on the GPU, use
+    :func:`openseespy_solvers.nvmath.direct_solver`. The LU factorization is
+    reused when OpenSees reports ``matrix_status='UNCHANGED'``.
 
     Parameters
     ----------

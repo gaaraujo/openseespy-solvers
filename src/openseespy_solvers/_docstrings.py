@@ -1,9 +1,13 @@
 """Shared NumPy-style docstring fragments for public factory functions."""
 
 _OPENSEES_LINEAR = """
-scheme : {'CSR', 'CSC'}, optional
-    Sparse storage scheme for :meth:`~openseespy_solvers._base.BaseOpenSeesSolver.to_openseespy`.
-    Default is ``'CSR'``.
+scheme : {'CSR', 'CSC', 'COO'}, optional
+    Sparse storage scheme requested from OpenSees in
+    :meth:`~openseespy_solvers._base.BaseOpenSeesSolver.to_openseespy`. Any
+    scheme works with any solver; when it differs from the format the backend
+    factorizes, the mapping is computed once per sparsity pattern. Default is
+    the backend's format (``'CSC'`` for SuperLU, UMFPACK and the symmetric
+    PARDISO types, ``'CSR'`` otherwise).
 writable : str or list of str, optional
     Writable buffers declared to OpenSees. Default is ``'none'``.
 debug : bool, optional

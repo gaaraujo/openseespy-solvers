@@ -10,7 +10,7 @@ backends you need.
 | Python | 3.12 or newer |
 | NumPy | 1.26 or newer |
 | scipy | 1.12 or newer |
-| OpenSeesPy | Needed to run OpenSees analyses and examples; use a serial build |
+| OpenSeesPy | 3.8.0 or newer, to run OpenSees analyses and the examples |
 
 `openseespy-solvers` does not install OpenSeesPy by default. This keeps the base package
 small and lets users add OpenSeesPy only when they need the OpenSees integration.
@@ -66,6 +66,22 @@ conda install -c conda-forge scikit-umfpack
 If pip builds from source on Linux, you may also need SuiteSparse from your system package
 manager, for example `libsuitesparse-dev` on Debian or Ubuntu.
 
+### PARDISO {#pardiso}
+
+`openseespy_solvers.scipy.pardiso` calls Intel MKL PARDISO through `ctypes`
+and needs only the MKL runtime library (`mkl_rt`). Install it from PyPI or
+conda:
+
+```bash
+python -m pip install mkl
+# or
+conda install mkl
+```
+
+An Intel oneAPI installation also works. To use a specific library, set
+`OPENSEESPY_SOLVERS_MKL_RT` to its full path. If `mkl_rt` cannot be loaded,
+`pardiso()` raises `BackendNotAvailableError` at construction.
+
 ### NVIDIA GPU {#gpu}
 
 GPU solvers require an NVIDIA driver and CUDA-compatible wheels. Start by checking the CUDA
@@ -87,9 +103,10 @@ For CUDA 12.x:
 python -m pip install "openseespy-solvers[cuda12]"
 ```
 
-These extras install both `cupy` and nvmath for the selected CUDA generation. Keep `cupy` and
-nvmath on the same CUDA generation. Avoid installing the generic `cupy` package unless you
-intentionally want to build `cupy` from source.
+These extras install `cupy` and `nvmath-python` 1.0 or newer, which uses cuDSS
+0.8, for the selected CUDA generation. Keep `cupy` and nvmath on the same CUDA
+generation. The generic `cupy` extra builds `cupy` from source; use it only if
+you need that.
 
 ## Development Install
 
@@ -134,9 +151,13 @@ python brick_bar_eigen.py
 
 ### OpenSeesPy Parallel Builds
 
-These solvers target serial OpenSeesPy. GPU backends accelerate the sparse solve, but the
-OpenSees model assembly still happens in one process. Parallel or MPI OpenSeesPy builds are
-not supported by this package. See [PythonSparse and parallelism](development/pythonsparse-interface.md#parallelism).
+The `openseespy` wheel on PyPI is a serial build, and GPU backends accelerate
+only the sparse solve; assembly remains in one process. Partitioned models
+need `DistributedPythonSparse`, which requires an MPI build of OpenSeesPy from a
+future OpenSees release. See
+[PythonSparse and parallelism](development/pythonsparse-interface.md#parallelism)
+and, to build it before that release,
+[Building OpenSees with the upcoming features](development/pythonsparse-interface.md#opensees-branch).
 
 ### UMFPACK Fails to Install on Windows
 
@@ -146,7 +167,7 @@ Use conda-forge:
 conda install -c conda-forge scikit-umfpack
 ```
 
-The PyPI package may need source-build tools that are inconvenient on Windows.
+The PyPI package is distributed as source only and needs a compiler and SuiteSparse.
 
 ### cupy Cannot Find CUDA Libraries
 

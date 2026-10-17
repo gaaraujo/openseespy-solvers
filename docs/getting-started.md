@@ -7,8 +7,7 @@ and [examples](examples.md). For install steps, see [Installation](installation.
 ## Linear analysis
 
 The finite element method discretizes a continuous structural model into nodes and
-elements. After assembly, the governing equations can be written, without loss of
-generality, as
+elements. After assembly, the equations of motion are
 
 $$
 \mathbf{M} \ddot{\mathbf{u}} + \mathbf{C} \dot{\mathbf{u}} + \mathbf{p}_r(\mathbf{u}) = \mathbf{p}_f(t),
@@ -41,7 +40,7 @@ ops.system("PythonSparse", solver.to_openseespy())
 
 ### CPU direct solver
 
-A good default on CPU is [`scipy.spsolve`](api/scipy.md#openseespy_solvers.scipy.spsolve):
+[`scipy.spsolve`](api/scipy.md#openseespy_solvers.scipy.spsolve) (SuperLU) needs no optional packages:
 
 ```python
 import openseespy.opensees as ops
@@ -51,8 +50,12 @@ solver = spsolve()
 ops.system("PythonSparse", solver.to_openseespy())
 ```
 
-For larger sparse systems on CPU, [`scipy.umfpack`](api/scipy.md#openseespy_solvers.scipy.umfpack)
-is often faster once UMFPACK is installed ([installation — UMFPACK](installation.md#umfpack)).
+Two other CPU direct solvers need optional libraries:
+[`scipy.umfpack`](api/scipy.md#openseespy_solvers.scipy.umfpack)
+([UMFPACK install](installation.md#umfpack)) and
+[`scipy.pardiso`](api/scipy.md#openseespy_solvers.scipy.pardiso)
+([PARDISO install](installation.md#pardiso)). [Examples](examples.md) compares
+`umfpack` with `spsolve` on one model family.
 
 ### GPU direct solver
 
@@ -93,7 +96,7 @@ lam = ops.eigen("PythonSparse", num_modes, eig_solver.to_openseespy())
 
 ### CPU eigen solver (`scipy.eigsh`)
 
-A good default on CPU is [`scipy.eigsh`](api/scipy.md#openseespy_solvers.scipy.eigsh):
+On the CPU, use [`scipy.eigsh`](api/scipy.md#openseespy_solvers.scipy.eigsh) (ARPACK):
 
 ```python
 import openseespy.opensees as ops
@@ -106,7 +109,7 @@ lam = ops.eigen("PythonSparse", num_modes, eig_solver.to_openseespy())
 
 ### GPU eigen solver (`cupy.eigsh`)
 
-A good default on GPU is [`cupy.eigsh`](api/cupy.md#openseespy_solvers.cupy.eigsh):
+On the GPU, use [`cupy.eigsh`](api/cupy.md#openseespy_solvers.cupy.eigsh):
 
 ```python
 import openseespy.opensees as ops

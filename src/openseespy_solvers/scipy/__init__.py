@@ -1,14 +1,15 @@
 """Sparse linear algebra solvers for OpenSeesPy (`scipy.sparse.linalg` backend).
 
-This module provides solver objects that wrap :mod:`scipy.sparse.linalg` for
-OpenSeesPy's ``PythonSparse`` linear and eigen commands. Factory signatures
-match `scipy.sparse.linalg` except that ``A`` and ``b`` (or ``K`` and ``M``) are supplied by
-OpenSees at solve time.
+This module provides solver objects that wrap :mod:`scipy.sparse.linalg`,
+UMFPACK (``scikit-umfpack``) and Intel MKL PARDISO for OpenSeesPy's
+``PythonSparse`` linear and eigen commands. Factory signatures match
+`scipy.sparse.linalg` except that ``A`` and ``b`` (or ``K`` and ``M``) are
+supplied by OpenSees at solve time.
 
 Each factory returns a solver object. Register it with OpenSees using
 :meth:`~openseespy_solvers._base.BaseOpenSeesSolver.to_openseespy`::
 
-    from openseespy_solvers.scipy import cg
+    from openseespy_solvers.scipy import cg, precond
     solver = cg(rtol=1e-8, M=precond.jacobi)
     ops.system("PythonSparse", solver.to_openseespy())
 

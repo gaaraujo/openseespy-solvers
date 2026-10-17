@@ -24,8 +24,12 @@ Copy an existing solver that is closest to yours:
 | GPU direct (nvmath) | `nvmath/__init__.py` → `_DirectSolver` |
 | Eigen (ARPACK) | `scipy/__init__.py` → `_Eigsh` |
 
-Shared OpenSees plumbing (buffers, caching, stats) lives in `_base.py`. Your
-solver only needs to implement the backend hooks and one solve method.
+Shared OpenSees plumbing (buffers, layout mapping, caching, stats) lives in
+`_base.py`. A new solver implements the backend hooks and one solve method, and
+sets two class attributes when the defaults do not fit: `_formats`, the
+compressed formats the backend factorizes (for example `("CSC",)`), and
+`_accepts_lower`, whether it can use the lower triangle of a symmetric matrix
+directly.
 
 ## Steps
 

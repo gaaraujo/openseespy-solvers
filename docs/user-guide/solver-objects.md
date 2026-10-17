@@ -21,7 +21,7 @@ Solver constructors (for example [`spsolve()`](../api/scipy.md#openseespy_solver
 All cached attributes are `None` until the first `solve` (or `formAp` for `A`).
 
 `A`
-: `scipy.sparse.spmatrix` or `cupyx.scipy.sparse.spmatrix` — cached system
+: `scipy.sparse.spmatrix` or `cupyx.scipy.sparse.spmatrix`. Cached system
   matrix from the last solve or `formAp` call, in the format the backend
   factorizes (CSC for `spsolve`/`umfpack`, CSR for nvmath), which may differ
   from `scheme`. With symmetric storage it holds only the lower triangle.
@@ -69,33 +69,39 @@ Relative residual (`last_residual_norm`) is computed only when both
 
 ## Compute precision (`dtype`) *(experimental)*
 
-Every solver constructor accepts ``dtype`` (default ``numpy.float64``). Supported values are
-``float32`` and ``float64``. The internal sparse solve, matrix cache (``A``,
+Solver constructors accept ``dtype`` (default ``numpy.float64``). Supported values are
+``float32`` and ``float64``. `pardiso` accepts ``float64`` only, and `umfpack` always factorizes in ``float64``. The internal sparse solve, matrix cache (``A``,
 ``K``, ``M``), and right-hand sides use that precision.
 
 ## Symmetric tangents
 
 `pardiso(matrix_type='symmetric' | 'spd')` and
-`nvmath.direct_solver(matrix_type='symmetric' | 'spd')` use LDL^T or Cholesky
-and ask OpenSees to store only the lower triangle, which halves the values
-copied per coefficient update. Use them only when the tangent is symmetric
-(elastic, most plasticity with associated flow, no frictional contact or
-follower loads). OpenSees builds without lower-triangle storage send the full
-matrix; the factorization type still applies. Lower-triangle storage is an
-upcoming OpenSees feature: the current `openseespy` wheel (3.8.0) always sends
-the full matrix, which these solvers handle.
+`nvmath.direct_solver(matrix_type='symmetric' | 'spd')` factorize with LDL^T
+or Cholesky and read only the lower triangle of the matrix. Use them only when
+the assembled tangent is symmetric; the upper triangle is ignored, so a
+nonsymmetric tangent gives a wrong solution without an error.
+
+These solvers also ask OpenSees to send only the lower triangle
+(`matrix_type='SYMMETRIC_LOWER'` in the configuration dict), which roughly halves the
+values copied per coefficient update. That option requires a future OpenSees
+release. The current `openseespy` wheel (3.8.0) ignores it and sends the full
+matrix. `pardiso` then drops the upper triangle once per sparsity pattern, and
+`nvmath.direct_solver` passes the full matrix to cuDSS; the factorization type
+is the same in both cases.
 
 ## Iterative solver tolerances
 
-The smallest relative residual an iterative solver can reach is set by
-round-off in the assembled tangent; on typical structural models a direct LU
-solve itself stops near 1e-12 to 1e-11. Requesting `rtol` at or below that
-level makes restarted GMRES or CG run to `maxiter` and report failure. Values
-around `rtol=1e-8` give solutions that agree with a direct solve to about
-1e-10 on such models. Inside Newton iterations the linear tolerance is the
-inexact-Newton forcing term: a fixed tolerance gives linear convergence of
-the Newton loop, so prefer a direct solver (or a tight tolerance) when the
-Newton iteration count matters.
+The smallest relative residual an iterative solver can reach is limited by
+round-off in the assembled tangent. On the solid brick-mesh models used to
+benchmark this package (up to about 5,400 equations), a direct LU solve reaches
+relative residuals of 1.4e-12 to 3.8e-12. Requesting `rtol` at or below that level makes
+restarted GMRES or CG run to `maxiter` and report failure. With `rtol=1e-8`,
+iterative and direct solutions agreed to 5e-10 or better on those models.
+
+Inside a Newton iteration, the linear tolerance acts as the forcing term of an
+inexact Newton method. A fixed tolerance gives only linear convergence of the
+Newton loop, so use a direct solver, or a tolerance well below the Newton
+convergence tolerance, when the number of Newton iterations matters.
 
 ## See also
 

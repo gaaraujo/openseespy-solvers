@@ -5,8 +5,8 @@ consistent with [`scipy.sparse.linalg.cg`](https://docs.scipy.org/doc/scipy/refe
 and [`cupyx.scipy.sparse.linalg.cg`](https://docs.cupy.dev/en/stable/reference/generated/cupyx.scipy.sparse.linalg.cg.html).
 
 OpenSees assembles the system matrix `A` during `solve`, not when you construct
-the solver. Pass a callable `M(A)`; OpenSees invokes it when the matrix
-structure or coefficients change, and reuses the cached result when
+the solver. Pass a callable `M(A)`; the solver calls it when the matrix
+structure or coefficients change and reuses the cached result when
 `matrix_status='UNCHANGED'`. Use a built-in preconditioner from
 [`openseespy_solvers.scipy.precond`](../api/precond.md) or
 [`openseespy_solvers.cupy.precond`](../api/precond_cupy.md), or supply your own callable `M(A)`.
@@ -64,9 +64,9 @@ names on GPU:
 
 [`ilu`](../api/precond_cupy.md#openseespy_solvers.cupy.precond.ilu)
 : Incomplete LU via [`cupyx.scipy.sparse.linalg.spilu`](https://docs.cupy.dev/en/stable/reference/generated/cupyx.scipy.sparse.linalg.spilu.html).
-Defaults to ``fill_factor=1`` so factorization runs on the GPU with **no
-fill-in** (ILU(0)-like). Other ``fill_factor`` values use `scipy.sparse.linalg` on CPU for the
-factorization; only ``solve`` stays on GPU.
+Defaults to ``fill_factor=1``, which factorizes on the GPU with no fill-in
+(ILU(0)). Other ``fill_factor`` values factorize on the CPU with
+`scipy.sparse.linalg`; only the triangular solves run on the GPU.
 
 [`direct`](../api/precond_cupy.md#openseespy_solvers.cupy.precond.direct)
 : Full sparse factorization as a ``LinearOperator``, primarily for
@@ -98,8 +98,8 @@ Other accepted values for `M`:
 : No preconditioning.
 
 `LinearOperator` or sparse matrix
-: A fixed, pre-built `M`. **Not recommended:** the equation count is unknown
-  until OpenSees builds the analysis model.
+: A fixed, pre-built `M`. Not recommended, because the number of equations
+  is unknown until OpenSees builds the analysis model.
 
 ## See also
 

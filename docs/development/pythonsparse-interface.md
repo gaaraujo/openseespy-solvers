@@ -1,8 +1,8 @@
 # PythonSparse interface
 
 OpenSeesPy passes sparse matrix data to solver objects as memoryviews. Solvers
-in this package wrap those buffers with NumPy, assemble a backend sparse matrix,
-invoke the numerical routine, and write results in place.
+in this package read those buffers with NumPy, build a backend sparse matrix,
+call the numerical routine, and write the results in place.
 
 ## Linear solve
 
@@ -37,15 +37,19 @@ OpenSees calls `solver.solve(**kwargs)`.
 
 **Optional dictionary keys**
 
-!!! note "Upcoming OpenSees feature"
-    `matrix_type` and `typed` are part of an upcoming OpenSees release and are
-    not in the current `openseespy` wheel on PyPI (3.8.0). That wheel ignores
-    both keys and sends the full matrix as raw bytes, so passing them is safe:
-    solvers in this package detect what OpenSees actually sent on every solve.
+!!! warning "Requires a future OpenSees release"
+    `matrix_type` and `typed` are not in the current `openseespy` wheel on PyPI
+    (3.8.0). That wheel ignores both keys, sends the full matrix, and passes
+    raw-byte memoryviews. The solvers in this package check on every solve
+    whether `matrix_type` was sent and read the buffers with an explicit
+    dtype, so they give the same results on 3.8.0 and on newer builds. A
+    custom solver that relies on `typed` should check `memoryview.format`
+    (`'B'` for raw bytes on 3.8.0). To use these keys now, see
+    [Building OpenSees with the upcoming features](#opensees-branch).
 
 `'matrix_type': 'SYMMETRIC_LOWER'`
-: Store and send only the lower triangle of a symmetric tangent (halves the
-  values buffer). Requested automatically by `pardiso(matrix_type=...)` and
+: Store and send only the lower triangle of a symmetric tangent (about half
+  the values of the full matrix). Requested automatically by `pardiso(matrix_type=...)` and
   `nvmath.direct_solver(matrix_type=...)` with `'symmetric'` or `'spd'`.
 
 `'typed': True`
@@ -89,54 +93,82 @@ OpenSees indicates how the system matrix changed since the previous solve:
 
 ## Serial OpenSeesPy and parallelism {#parallelism}
 
-These solvers work with **serial OpenSeesPy** — the standard build where the full
-analysis pipeline runs on **one process**. That includes state determination, element
-and nodal assembly, constraint handling, convergence tests, and the call into
-`PythonSparse` with the assembled stiffness (and mass, for eigen).
+With the standard (serial) OpenSeesPy build, the whole analysis runs in one
+process: state determination, element and nodal assembly, constraint handling,
+convergence tests, and the `PythonSparse` call with the assembled stiffness
+(and mass, for eigen analysis).
 
 ![OpenSeesPy assembles on the CPU; PythonSparse receives buffers; GPU backends solve on device](../assets/pythonsparse-gpu-workflow.png)
 
-The diagram above is a typical **nonlinear static/transient** step with a GPU direct or
-iterative backend:
+The diagram shows one step of a nonlinear static or transient analysis with a
+GPU backend:
 
-1. **OpenSees (CPU, C++)** — Newton loop: element state determination, assemble residual
-   `r` and effective tangent `K_T*`, update displacements when converged.
-2. **Python solver (CPU, Python)** — `PythonSparse` callback reads `r` and `K_T*`
-   from OpenSees memoryviews, orchestrates the backend, writes `Δu` back.
-3. **GPU (optional)** — copy `r` and `K_T*` host→device, solve
-   `K_T* Δu = r`, copy `Δu` device→host. scipy/UMFPACK paths stay on the CPU instead
-   of the third column.
+1. OpenSees (C++, CPU) runs the Newton loop: element state determination,
+   assembly of the residual `r` and the effective tangent `K_T*`, and the
+   displacement update after convergence.
+2. The Python solver object (CPU) reads `r` and `K_T*` from the OpenSees
+   memoryviews, calls the backend, and writes `Δu` back.
+3. On the GPU (optional), the backend copies `r` and `K_T*` to the device,
+   solves `K_T* Δu = r`, and copies `Δu` back to the host. The scipy, UMFPACK
+   and PARDISO solvers do this step on the CPU.
 
-Eigen analysis follows the same split: OpenSees assembles **K** and **M** on the CPU; the
-solver object runs ARPACK, LOBPCG, or shift-invert on CPU and/or GPU depending on the
-solver constructor you choose.
+Eigen analysis follows the same split: OpenSees assembles `K` and `M` on the
+CPU, and the solver object runs ARPACK, LOBPCG or a shift-invert iteration on
+the CPU or the GPU, depending on the constructor.
 
-!!! warning "Upcoming OpenSees feature: not in the current pip wheel"
-    `DistributedPythonSparse` is part of an upcoming OpenSees release. The
-    current `openseespy` wheel on PyPI (3.8.0) is a serial build and rejects
-    `system('DistributedPythonSparse', ...)` with "unknown system type". It
-    needs an OpenSeesPy built with MPI (parallel interpreters).
+!!! warning "Requires a future OpenSees release"
+    `DistributedPythonSparse` is not in the current `openseespy` wheel on PyPI
+    (3.8.0), which is a serial build. It requires an OpenSeesPy built with MPI
+    (parallel interpreters) from a future OpenSees release. On the 3.8.0 wheel,
+    `ops.system('DistributedPythonSparse', ...)` and
+    `ops.eigen('DistributedPythonSparse', ...)` raise `OpenSeesError`, and
+    OpenSees prints `unknown system type DistributedPythonSparse` (or
+    `eigen - unknown option specified`) to stderr. See
+    [Building OpenSees with the upcoming features](#opensees-branch).
 
 **Partitioned (MPI) models.** OpenSeesPy builds with parallel interpreters
 provide `system('DistributedPythonSparse', solver.to_openseespy())` and
 `eigen('DistributedPythonSparse', n, ...)`. Every rank runs the same script and
-builds the same solver object; worker ranks send their part of the RHS and
-their matrix contributions to rank 0, only rank 0 calls the solver, and the
-solution is sent back. Nothing else changes in the script. Constructors in this
-package allocate nothing on the GPU until the first solve, so worker ranks never
-touch the device. `'PythonSparse'` itself stays serial on every build, so
-scripts that run independent models per rank are unaffected.
+builds the same solver object. Worker ranks send their part of the right-hand
+side and their matrix contributions to rank 0, rank 0 calls the solver, and the
+solution is sent back to the workers. Solver constructors in this package
+allocate no GPU memory before the first solve, so GPU solvers on worker ranks
+never touch the device. `'PythonSparse'` remains serial on every build, so
+scripts that run independent models on each rank are unaffected.
 
-**Where parallelism exists today**
+**Where the work runs**
 
 | Layer | Behavior |
 |-------|----------|
-| OpenSees model pipeline | Serial (single CPU process), or partitioned across MPI ranks with `DistributedPythonSparse` (solve on rank 0) |
-| scipy backends ([`spsolve`](../api/scipy.md#openseespy_solvers.scipy.spsolve), [`cg`](../api/scipy.md#openseespy_solvers.scipy.cg), [`eigsh`](../api/scipy.md#openseespy_solvers.scipy.eigsh), …) | CPU linear algebra; may use multithreaded BLAS/LAPACK inside scipy/UMFPACK |
-| cupy / nvmath backends | **GPU** factorization, iterative solve, or eigen iteration; matrix assembly still happens on the CPU in OpenSees, with host↔device transfers inside the solver |
+| OpenSees model pipeline | One CPU process, or partitioned across MPI ranks with `DistributedPythonSparse` (solve on rank 0) |
+| scipy backends ([`spsolve`](../api/scipy.md#openseespy_solvers.scipy.spsolve), [`pardiso`](../api/scipy.md#openseespy_solvers.scipy.pardiso), [`cg`](../api/scipy.md#openseespy_solvers.scipy.cg), [`eigsh`](../api/scipy.md#openseespy_solvers.scipy.eigsh), ...) | CPU; SciPy, UMFPACK and MKL may use multiple threads |
+| cupy and nvmath backends | GPU factorization, iterative solve or eigen iteration; assembly remains on the CPU in OpenSees, with host-device transfers inside the solver |
 
-So a GPU setup speeds up the **sparse solve step**, not domain decomposition or
-multi-rank OpenSees analysis.
+A GPU backend therefore accelerates the sparse solve only, not assembly or
+state determination.
+
+## Building OpenSees with the upcoming features {#opensees-branch}
+
+The `openseespy-solvers` branch of
+[gaaraujo/OpenSees](https://github.com/gaaraujo/OpenSees/tree/openseespy-solvers)
+contains the OpenSees changes that `matrix_type`, `typed` and
+`DistributedPythonSparse` need, on top of a recent OpenSees `master`. In
+general, compiling OpenSeesPy from that branch gives access to these features
+before an OpenSees release includes them. The branch has not been merged into
+OpenSees, so it has had less testing than a release, and its behavior and
+interface may change in the final version.
+
+- Serial OpenSeesPy: build the `OpenSeesPy` target as for any OpenSees build.
+- MPI OpenSeesPy (`DistributedPythonSparse`): configure with
+  `-DOPENSEESPY_MPI=ON`, which also requires MPI and METIS 5 (set
+  `METIS5_ROOT` if CMake does not find it). The option is off by default and
+  changes no other target.
+
+Copy the built library to `opensees.pyd` (Windows) or `opensees.so` (Linux),
+put its directory on `sys.path`, and use `import opensees as ops` in place of
+`import openseespy.opensees as ops`. The end-to-end tests of this package
+(`tests/test_opensees_integration.py`) use such a build when
+`OPENSEESPY_PATH` is set to that directory.
 
 ## See also
 

@@ -13,8 +13,8 @@ OpenSeesPy.
 ## How it works
 
 OpenSeesPy runs the analysis loop on the CPU (state determination, assembly, Newton
-iterations). When a linear solve is needed, it calls your **PythonSparse** solver with
-assembled buffers; GPU backends copy data to the device, solve, and copy the result back.
+iterations). When a linear solve is needed, it calls the `PythonSparse` solver object with
+the assembled buffers; GPU backends copy the data to the device, solve, and copy the result back.
 
 ![OpenSeesPy PythonSparse workflow with optional GPU solve](assets/pythonsparse-gpu-workflow.png)
 
@@ -23,36 +23,24 @@ More detail on callbacks, matrix status, and what runs where:
 
 ## Start Here
 
-In a new environment:
+Install the package with its CPU solvers (SciPy):
 
 ```bash
 python -m pip install openseespy-solvers
 ```
 
-for a default installation.
+Optional backends are installed as extras or separate packages:
 
 ```bash
-python -m pip install "openseespy-solvers[umfpack]"
+python -m pip install "openseespy-solvers[opensees]"   # OpenSeesPy from PyPI
+python -m pip install "openseespy-solvers[umfpack]"    # UMFPACK (Linux, macOS)
+python -m pip install mkl                              # MKL runtime for PARDISO
+python -m pip install "openseespy-solvers[cuda13]"     # or [cuda12]: cupy and nvmath
 ```
 
-for the latest UMFPACK-backed CPU direct solver (`scipy.umfpack`). On Windows, see
-[UMFPACK install notes](installation.md#umfpack).
-
-```bash
-python -m pip install "openseespy-solvers[cuda12]"
-# or
-python -m pip install "openseespy-solvers[cuda13]"
-```
-
-if you have an NVIDIA GPU and want GPU-accelerated solvers (`cupy` + nvmath). Match
-`cuda12` / `cuda13` to the CUDA generation from `nvidia-smi`. Details:
-[GPU install](installation.md#gpu).
-
-If you want to make sure OpenSeesPy is installed as well:
-
-```bash
-python -m pip install "openseespy-solvers[opensees]"
-```
+Match `cuda12` or `cuda13` to the CUDA version reported by `nvidia-smi`. On
+Windows, install UMFPACK from conda-forge. Details:
+[Installation](installation.md).
 
 Then wire a solver into OpenSeesPy:
 
@@ -80,7 +68,7 @@ For iterative solvers, preconditioners, and [`hybrid()`](api/hybrid.md#openseesp
 
 | Module | Provides |
 |--------|----------|
-| [`scipy`](api/scipy.md) | CPU solvers: [`spsolve`](api/scipy.md#openseespy_solvers.scipy.spsolve), [`umfpack`](api/scipy.md#openseespy_solvers.scipy.umfpack), [`cg`](api/scipy.md#openseespy_solvers.scipy.cg), [`gmres`](api/scipy.md#openseespy_solvers.scipy.gmres), [`eigsh`](api/scipy.md#openseespy_solvers.scipy.eigsh), [`lobpcg`](api/scipy.md#openseespy_solvers.scipy.lobpcg) |
+| [`scipy`](api/scipy.md) | CPU solvers: [`spsolve`](api/scipy.md#openseespy_solvers.scipy.spsolve), [`umfpack`](api/scipy.md#openseespy_solvers.scipy.umfpack), [`pardiso`](api/scipy.md#openseespy_solvers.scipy.pardiso), [`cg`](api/scipy.md#openseespy_solvers.scipy.cg), [`gmres`](api/scipy.md#openseespy_solvers.scipy.gmres), [`eigsh`](api/scipy.md#openseespy_solvers.scipy.eigsh), [`lobpcg`](api/scipy.md#openseespy_solvers.scipy.lobpcg) |
 | [`scipy.precond`](api/precond.md) | CPU preconditioners: [`jacobi`](api/precond.md#openseespy_solvers.scipy.precond.jacobi), [`ilu`](api/precond.md#openseespy_solvers.scipy.precond.ilu), [`direct`](api/precond.md#openseespy_solvers.scipy.precond.direct) |
 | [`cupy`](api/cupy.md) | GPU solvers: [`spsolve`](api/cupy.md#openseespy_solvers.cupy.spsolve), [`cg`](api/cupy.md#openseespy_solvers.cupy.cg), [`gmres`](api/cupy.md#openseespy_solvers.cupy.gmres), [`eigsh`](api/cupy.md#openseespy_solvers.cupy.eigsh), [`lobpcg`](api/cupy.md#openseespy_solvers.cupy.lobpcg) |
 | [`cupy.precond`](api/precond_cupy.md) | GPU preconditioners: [`jacobi`](api/precond_cupy.md#openseespy_solvers.cupy.precond.jacobi), [`ilu`](api/precond_cupy.md#openseespy_solvers.cupy.precond.ilu), [`direct`](api/precond_cupy.md#openseespy_solvers.cupy.precond.direct) |

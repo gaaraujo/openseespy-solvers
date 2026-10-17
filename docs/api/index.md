@@ -45,7 +45,7 @@ passing `solver.to_openseespy()` to `ops.system("PythonSparse", ...)` or
 | [`scipy.pardiso`](scipy.md#openseespy_solvers.scipy.pardiso) | Intel MKL runtime | CPU sparse direct solve using PARDISO (LU, LDL^T, Cholesky) |
 | [`scipy.cg`](scipy.md#openseespy_solvers.scipy.cg) | `scipy.sparse.linalg` | CPU Conjugate Gradient |
 | [`scipy.gmres`](scipy.md#openseespy_solvers.scipy.gmres) | `scipy.sparse.linalg` | CPU GMRES |
-| [`cupy.spsolve`](cupy.md#openseespy_solvers.cupy.spsolve) | `cupyx.scipy.sparse.linalg` | CUDA sparse direct solve |
+| [`cupy.spsolve`](cupy.md#openseespy_solvers.cupy.spsolve) | `cupyx.scipy.sparse.linalg` | Sparse direct solve; factorization on the CPU, triangular solves on the GPU |
 | [`cupy.cg`](cupy.md#openseespy_solvers.cupy.cg) | `cupyx.scipy.sparse.linalg` | CUDA Conjugate Gradient |
 | [`cupy.gmres`](cupy.md#openseespy_solvers.cupy.gmres) | `cupyx.scipy.sparse.linalg` | CUDA GMRES |
 | [`nvmath.direct_solver`](nvmath.md#openseespy_solvers.nvmath.direct_solver) | NVIDIA `nvmath.sparse` | CUDA sparse direct solve |
@@ -76,10 +76,10 @@ passing `solver.to_openseespy()` to `ops.system("PythonSparse", ...)` or
 If you already use [`scipy.sparse.linalg`](https://docs.scipy.org/doc/scipy/reference/sparse.linalg.html)
 or [`cupyx.scipy.sparse.linalg`](https://docs.cupy.dev/en/stable/reference/scipy_sparse_linalg.html),
 the solver constructors in [`openseespy_solvers.scipy`](scipy.md) and
-[`openseespy_solvers.cupy`](cupy.md) follow the same names and keyword arguments. The only
-routine change is that you **do not pass `A` and `b` (or `K` and `M`)** — OpenSees
-assembles those during analysis — and you **register** the solver with OpenSeesPy
-instead of calling the solve function yourself.
+[`openseespy_solvers.cupy`](cupy.md) follow the same names and keyword arguments.
+The difference is that `A` and `b` (or `K` and `M`) are not passed, because
+OpenSees assembles them during the analysis, and the solver is registered with
+OpenSeesPy instead of being called directly.
 
 ### Direct solve
 
@@ -154,8 +154,9 @@ ops.system("PythonSparse", solver.to_openseespy())
 ops.analyze(num_steps)
 ```
 
-[`direct_solver()`](nvmath.md#openseespy_solvers.nvmath.direct_solver) exposes `execution=`, `multithreading_lib=`, and `plan_algorithm=`;
-`stream` and other `DirectSolverOptions` fields are not. See [nvmath](nvmath.md) for
+[`direct_solver()`](nvmath.md#openseespy_solvers.nvmath.direct_solver) exposes `execution=`, `multithreading_lib=`, `plan_algorithm=`, and
+`matrix_type=` (mapped to `DirectSolverOptions.sparse_system_type`); `stream` and
+the other `DirectSolverOptions` fields are not. See [nvmath](nvmath.md) for
 details.
 
 See [Solver objects](../user-guide/solver-objects.md) and

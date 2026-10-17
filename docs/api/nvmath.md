@@ -33,9 +33,9 @@ ops.system("PythonSparse", solver.to_openseespy())
 
 [`direct_solver()`](#openseespy_solvers.nvmath.direct_solver) mirrors
 [`nvmath.sparse.advanced.DirectSolver`](https://docs.nvidia.com/cuda/nvmath-python/latest/host-apis/sparse/generated/nvmath.sparse.advanced.DirectSolver.html)
-where it can: pass `execution=` through to the underlying constructor, map
-`multithreading_lib=` to `DirectSolverOptions`, and apply `plan_algorithm=` on
-`solver.plan_config` before planning. OpenSees supplies `a` and `b`; the wrapper
+where it can: it passes `execution=` to the underlying constructor, maps
+`multithreading_lib=` and `matrix_type=` to `DirectSolverOptions`, and applies
+`plan_algorithm=` to `solver.plan_config` before planning. OpenSees supplies `a` and `b`; the wrapper
 calls `plan()`, `factorize()`, and `solve()` and reuses the factorization when
 OpenSees reports `matrix_status='UNCHANGED'`.
 
@@ -48,8 +48,11 @@ Not exposed: `stream`, a full `options=` object, and other `plan_config` /
 copies them to the device, factors the sparse matrix with `nvmath.sparse`/cuDSS, and writes the
 solution back through the OpenSeesPy callback.
 
-Prefer `scheme='CSR'` (the factory default): cuDSS uses CSR internally, so
-`scheme='CSC'` forces an extra CSC→CSR conversion.
+`scheme='CSR'` (the default) is the format cuDSS factorizes. With
+`scheme='CSC'` or `'COO'`, the mapping onto CSR is computed once per sparsity
+pattern, and each coefficient update costs one extra gather on the host.
+
+Requires `nvmath-python` 1.0 or newer (cuDSS 0.8).
 
 ## Function Reference
 

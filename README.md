@@ -3,7 +3,7 @@
 `scipy`-style sparse linear and eigen solvers for OpenSeesPy
 [`PythonSparse`](https://opensees.github.io/OpenSeesDocumentation/user/manual/analysis/system/PythonSparse.html).
 
-`openseespy-solvers` wraps familiar numerical backends such as `scipy.sparse.linalg`,
+`openseespy-solvers` wraps numerical backends such as `scipy.sparse.linalg`, Intel MKL PARDISO,
 `cupyx.scipy.sparse.linalg`, and NVIDIA `nvmath.sparse` as solver objects that OpenSeesPy can call directly. OpenSeesPy
 assembles the stiffness, mass, and right-hand-side arrays; the solver object performs
 the sparse solve and writes the result back to OpenSeesPy.
@@ -30,6 +30,9 @@ Optional backends:
 ```bash
 # CPU UMFPACK direct solver
 python -m pip install "openseespy-solvers[umfpack]"
+
+# CPU PARDISO direct solver (needs only the MKL runtime)
+python -m pip install mkl
 
 # NVIDIA GPU backends: choose the CUDA generation reported by nvidia-smi
 python -m pip install "openseespy-solvers[cuda13]"   # or [cuda12]
@@ -72,7 +75,7 @@ eigenvalues = ops.eigen("PythonSparse", 5, eig_solver.to_openseespy())
 | Static or transient linear solve | `scipy.spsolve`; `scipy.umfpack` for larger CPU systems | `nvmath.direct_solver` |
 | Generalized eigen solve | `scipy.eigsh` | `cupy.eigsh` |
 
-Tutorial and API docs cover wiring, alternatives, and optional backends:
+The tutorial and API pages cover the other solvers and the optional backends:
 [openseespy-solvers.readthedocs.io](https://openseespy-solvers.readthedocs.io/).
 
 ## Modules

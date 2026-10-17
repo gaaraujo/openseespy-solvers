@@ -13,7 +13,7 @@ Direct methods:
 
 | Constructor | `cupy` analogue | Description |
 |---------|---------------|-------------|
-| [`spsolve`](#openseespy_solvers.cupy.spsolve) | `cupyx.scipy.sparse.linalg.splu` | Sparse direct solver on CUDA |
+| [`spsolve`](#openseespy_solvers.cupy.spsolve) | `cupyx.scipy.sparse.linalg.splu` | Sparse direct solver; factorization on the CPU, triangular solves on the GPU |
 
 Iterative methods:
 

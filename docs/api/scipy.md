@@ -61,12 +61,17 @@ python -m pip install "openseespy-solvers[umfpack]"
 
 On Windows, install `scikit-umfpack` from conda-forge instead.
 
-[`umfpack`](#openseespy_solvers.scipy.umfpack) defaults to `scheme='CSC'` and prefers the
-`di` (int32) family — matching OpenSees native `UmfPack` — widening to `dl`
-(int64) only when needed (`index_dtype='auto'`). For shift-invert
-[`eigsh`](#openseespy_solvers.scipy.eigsh), consider `scheme='CSC'` so OpenSees
-assembles `K`/`M` for SciPy's SuperLU/UMFPACK factor; plain ARPACK matvecs are
-usually happier with CSR (the default).
+[`umfpack`](#openseespy_solvers.scipy.umfpack) defaults to `scheme='CSC'` and uses the
+`di` (int32) family, as the native OpenSees `UmfPack` does, widening to `dl`
+(int64) only when the indices require it (`index_dtype='auto'`).
+
+[`pardiso`](#openseespy_solvers.scipy.pardiso) needs the MKL runtime
+(`python -m pip install mkl`); see [Installation](../installation.md#pardiso).
+
+[`eigsh`](#openseespy_solvers.scipy.eigsh) in shift-invert mode factorizes
+`K - sigma M` with SciPy's SuperLU by default. Pass a direct solver as
+`linear_solver=` (for example `eigsh(linear_solver=pardiso())`) to use it for
+that factorization instead.
 
 Parameters documented below follow `scipy` naming where possible. Extra parameters such as
 `scheme`, `writable`, `debug`, `record_stats`, and `dtype` control the OpenSeesPy integration.
@@ -78,6 +83,7 @@ Parameters documented below follow `scipy` naming where possible. Extra paramete
       members:
         - spsolve
         - umfpack
+        - pardiso
         - cg
         - gmres
         - eigsh
